@@ -22,6 +22,11 @@ hl: PackedReg,
 sp: u16,
 pc: u16,
 ime: bool,
+pub fn init__() Registers {
+    var regs: Registers = undefined;
+    regs.set("PC", 0x00);
+    return regs;
+}
 pub fn init() Registers {
     var regs: Registers = undefined;
     regs.set("PC", 0x0100);
@@ -105,6 +110,10 @@ pub fn get(self: Registers, comptime s: []const u8) getType(s) {
                 return @bitCast(self.de);
             } else if (comptime streql(s, "HL")) {
                 return @bitCast(self.hl);
+            } else if (comptime streql(s, "PC")) {
+                return self.pc;
+            } else if (comptime streql(s, "SP")) {
+                return self.sp;
             } else @compileError(std.fmt.comptimePrint("invalid u16 register s: {s}", .{s}));
         },
         else => unreachable,

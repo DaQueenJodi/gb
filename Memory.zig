@@ -5,6 +5,7 @@ const Memory = @This();
 
 const KiB = 1024;
 
+rom_mapped: bool,
 bank0: [16 * KiB]u8,
 bank1: [16 * KiB]u8,
 vram: [8 * KiB]u8,
@@ -16,8 +17,21 @@ io: IoRegs,
 hram: [0x7F]u8,
 ie: IE,
 
+const BOOT_ROM = @embedFile("dmg_boot.bin");
+
+pub fn create__(allocator: Allocator) !*Memory {
+    const mem = try allocator.create(Memory);
+    mem.rom_mapped = true;
+    mem.io.LCDC.lcd_ppu_enable = false;
+
+    return mem;
+}
+
 pub fn create(allocator: Allocator) !*Memory {
     const mem = try allocator.create(Memory);
+
+    mem.rom_mapped = false;
+    mem.io.LY = 0;
 
     mem.writeByte(0xFF05, 0x00);
     mem.writeByte(0xFF06, 0x00);
@@ -50,7 +64,7 @@ pub fn create(allocator: Allocator) !*Memory {
     mem.writeByte(0xFF4A, 0x00);
     mem.writeByte(0xFF4B, 0x00);
     mem.writeByte(0xFFFF, 0x00);
-    
+
     return mem;
 }
 
@@ -65,7 +79,9 @@ const IO_OFF = 0xFF00;
 const HRAM_OFF = 0xFF80;
 const IE_OFF = 0xFFFF;
 
-pub const MemRange = enum { bank0, bank1, vram, wram0, wram1, prohiboted, oam, io, hram, ie, external_ram };
+const ECHO_DIFF = 0xE000 - 0xC000;
+
+pub const MemRange = enum { bank0, bank1, vram, wram0, wram1, echo, prohiboted, oam, io, hram, ie, external_ram };
 
 fn rangeFromAddr(addr: usize) MemRange {
     return switch (addr) {
@@ -79,7 +95,8 @@ fn rangeFromAddr(addr: usize) MemRange {
         IO_OFF...0xFF7F => .io,
         HRAM_OFF...0xFFFE => .hram,
         0xFFFF => .ie,
-        0xE000...0xFDFF, 0xFEA0...0xFEFF => .prohiboted,
+        0xE000...0xFDFF => .echo,
+        0xFEA0...0xFEFF => .prohiboted,
         else => std.debug.panic("invalid range: {X:0<4}", .{addr}),
     };
 }
@@ -93,14 +110,20 @@ pub fn readByte(self: Memory, addr: usize) u8 {
             return 0xFF;
         },
         .external_ram => self.external_ram[addr - EXTERNAL_RAM_OFF],
-        .bank0 => self.bank0[addr - BANK0_OFF],
-        .bank1 => self.bank0[addr - BANK1_OFF],
+        .bank0 => {
+            if (self.rom_mapped and addr - BANK0_OFF < 0x0100) {
+                return BOOT_ROM[addr - BANK0_OFF];
+            }
+            return self.bank0[addr - BANK0_OFF];
+        },
+        .bank1 => self.bank1[addr - BANK1_OFF],
         .vram => self.vram[addr - VRAM_OFF],
         .oam => self.oam[addr - OAM_OFF],
         .io => self.ioReadByte(addr),
         .hram => self.hram[addr - HRAM_OFF],
         .wram0 => self.wram0[addr - WRAM0_OFF],
         .wram1 => self.wram1[addr - WRAM1_OFF],
+        .echo => self.readByte(addr - ECHO_DIFF),
         .ie => @bitCast(self.ie),
     };
 }
@@ -112,17 +135,18 @@ pub fn readBytes(self: Memory, addr: usize) u16 {
             return 0xFFFF;
         },
         .external_ram => std.mem.readInt(u16, &[2]u8{ self.external_ram[addr - EXTERNAL_RAM_OFF], self.external_ram[addr - EXTERNAL_RAM_OFF + 1] }, .little),
-        .bank0 => std.mem.readInt(u16, &[2]u8{ self.bank0[addr - BANK0_OFF], self.bank0[addr - BANK0_OFF + 1] }, .little),
-        .bank1 => std.mem.readInt(u16, &[2]u8{ self.bank0[addr - BANK1_OFF], self.bank0[addr - BANK1_OFF + 1] }, .little),
-        .vram => std.mem.readInt(u16, &[2]u8{ self.vram[addr - VRAM_OFF], self.vram[addr - VRAM_OFF + 1] }, .little),
-        .oam => std.mem.readInt(u16, &[2]u8{ self.oam[addr - OAM_OFF], self.oam[addr - OAM_OFF + 1] }, .little),
+        .bank0 => std.mem.readInt(u16, self.bank0[addr - BANK0_OFF ..][0..2], .little),
+        .bank1 => std.mem.readInt(u16, self.bank0[addr - BANK1_OFF ..][0..2], .little),
+        .vram => std.mem.readInt(u16, self.vram[addr - VRAM_OFF ..][0..2], .little),
+        .oam => std.mem.readInt(u16, self.oam[addr - OAM_OFF ..][0..2], .little),
         .io => {
-            std.log.err("IO is not implemented yet", .{});
+            std.log.warn("IO is not implemented yet", .{});
             return 0;
         },
-        .hram => std.mem.readInt(u16, &[2]u8{ self.hram[addr - HRAM_OFF], self.hram[addr - HRAM_OFF] }, .little),
-        .wram0 => std.mem.readInt(u16, &[2]u8{ self.wram0[addr - WRAM0_OFF], self.hram[addr - WRAM0_OFF] }, .little),
-        .wram1 => std.mem.readInt(u16, &[2]u8{ self.wram1[addr - WRAM1_OFF], self.hram[addr - WRAM1_OFF] }, .little),
+        .hram => std.mem.readInt(u16, self.hram[addr - HRAM_OFF..][0..2], .little),
+        .wram0 => std.mem.readInt(u16, self.wram0[addr - WRAM0_OFF..][0..2], .little),
+        .wram1 => std.mem.readInt(u16, self.wram1[addr - WRAM1_OFF..][0..2], .little),
+        .echo => self.readBytes(addr - ECHO_DIFF),
         .ie => @panic("cant read ie as a u16"),
     };
 }
@@ -140,6 +164,7 @@ pub fn writeByte(self: *Memory, addr: usize, val: u8) void {
         .oam => self.oam[addr - OAM_OFF] = val,
         .io => self.ioWriteByte(addr, val),
         .hram => self.hram[addr - HRAM_OFF] = val,
+        .echo => self.writeByte(addr - ECHO_DIFF, val),
         .ie => self.ie = @bitCast(val),
     }
 }
@@ -150,19 +175,14 @@ pub fn writeBytes(self: *Memory, addr: usize, val: u16) void {
         .prohiboted => std.log.warn("writing to prohiboted memory region: {X:0<4}", .{addr}),
         .bank0 => std.log.warn("tried to write to ROM lol", .{}),
         .bank1 => std.log.warn("tried to write to ROM lol", .{}),
-        .vram => {
-            const p: *u16 = @ptrCast(&self.vram[addr - VRAM_OFF]);
-            p.* = val;
-        },
-        .oam => {
-            const p: *u16 = @ptrCast(&self.oam[OAM_OFF]);
-            p.* = val;
-        },
-        .io => std.log.err("IO not implemented yet", .{}),
-        .hram => {
-            const p: *u16 = @ptrCast(&self.hram[addr - HRAM_OFF]);
-            p.* = val;
-        },
+        .vram => std.mem.writeInt(u16, self.vram[addr - VRAM_OFF ..][0..2], val, .little),
+        .oam => std.mem.writeInt(u16, self.oam[addr - OAM_OFF ..][0..2], val, .little),
+        .io => std.log.warn("IO not implemented yet", .{}),
+        .hram => std.mem.writeInt(u16, self.hram[addr - HRAM_OFF ..][0..2], val, .little),
+        .external_ram => std.mem.writeInt(u16, self.external_ram[addr - EXTERNAL_RAM_OFF ..][0..2], val, .little),
+        .wram0 => std.mem.writeInt(u16, self.wram0[addr - WRAM0_OFF ..][0..2], val, .little),
+        .wram1 => std.mem.writeInt(u16, self.wram1[addr - WRAM1_OFF ..][0..2], val, .little),
+        .echo => self.writeBytes(addr - ECHO_DIFF, val),
         .ie => @panic("cant write u16 to ie"),
     }
 }
@@ -220,17 +240,12 @@ const BGP = packed struct {
             1 => self.id1,
             2 => self.id2,
             3 => self.id3,
-            else => unreachable
+            else => unreachable,
         };
     }
 };
 
-const OBP = packed struct {
-    _padding: u2,
-    id1: u2,
-    id2: u2,
-    id3: u2
-};
+const OBP = packed struct { _padding: u2, id1: u2, id2: u2, id3: u2 };
 const OBP0_OFF = 0xFF48;
 const OBP1_OFF = 0xFF49;
 
@@ -255,69 +270,171 @@ const IoRegs = struct {
     WY: u8,
 };
 
-fn ioReadByte(self: Memory, addr: usize) u8 {
-    return switch (addr) {
-        IF_OFF => @bitCast(self.io.IF),
-        SCY_OFF => self.io.SCY,
-        SCX_OFF => self.io.SCX,
-        STAT_OFF => @bitCast(self.io.STAT),
+fn ioReadByte(mem: Memory, addr: usize) u8 {
+    switch (addr) {
+        IF_OFF => {
+            std.log.info("checking IF: {}", .{mem.io.IF});
+            return @bitCast(mem.io.IF);
+        },
+        SCY_OFF => {
+            std.log.info("checking SCY: {}", .{mem.io.SCY});
+            return mem.io.SCY;
+        },
+        SCX_OFF => {
+            std.log.info("checking SCX: {}", .{mem.io.SCX});
+            return mem.io.SCX;
+        },
+        STAT_OFF => {
+            std.log.info("checking STAT: {}", .{mem.io.STAT});
+            return @bitCast(mem.io.STAT);
+        },
         SB_OFF => {
-            std.log.err("Serial Transfer is not implemented :(", .{});
+            std.log.warn("Serial Transfer is not implemented :(", .{});
             return 0x00;
         },
         SC_OFF => {
-            std.log.err("Serial Transfer is not implemented :(", .{});
+            std.log.warn("Serial Transfer is not implemented :(", .{});
             return 0x00;
         },
-        LCDC_OFF => @bitCast(self.io.LCDC),
-        LY_OFF => self.io.LY,
-        TIMA_OFF => self.io.TIMA,
-        TMA_OFF => self.io.TMA,
-        TAC_OFF => @bitCast(self.io.TAC),
-        LYC_OFF => self.io.LYC,
-        BGP_OFF => @bitCast(self.io.BGP),
-        OBP0_OFF => @bitCast(self.io.OBP0),
-        OBP1_OFF => @bitCast(self.io.OBP1),
-
-        else => @panic("unknown IO address"),
-    };
+        LCDC_OFF => {
+            std.log.info("checking LCDC: {}", .{mem.io.LCDC});
+            return @bitCast(mem.io.LCDC);
+        },
+        LY_OFF => {
+            std.log.info("checking LY: {}", .{mem.io.LY});
+            return mem.io.LY;
+        },
+        TIMA_OFF => {
+            std.log.info("checking TIMA: {}", .{mem.io.TIMA});
+            return mem.io.TIMA;
+        },
+        TMA_OFF => {
+            std.log.info("checking TMA: {}", .{mem.io.TMA});
+            return mem.io.TMA;
+        },
+        TAC_OFF => {
+            std.log.info("checking TAC: {}", .{mem.io.TAC});
+            return @bitCast(mem.io.TAC);
+        },
+        LYC_OFF => {
+            std.log.info("checking LYC: {}", .{mem.io.LYC});
+            return mem.io.LYC;
+        },
+        BGP_OFF => {
+            std.log.info("checking BGP: {}", .{mem.io.BGP});
+            return @bitCast(mem.io.BGP);
+        },
+        OBP0_OFF => {
+            std.log.info("checking OBP0: {}", .{mem.io.OBP0});
+            return @bitCast(mem.io.OBP0);
+        },
+        OBP1_OFF => {
+            std.log.info("checking OBP1: {}", .{mem.io.OBP1});
+            return @bitCast(mem.io.OBP1);
+        },
+        0xFF10...0xFF26 => {
+            std.log.warn("sound is not implemented yet :(", .{});
+            return 0x0;
+        },
+        else => {
+            std.log.warn("unknown IO address: {X:0>4}", .{addr});
+            return 0xFF;
+        }
+    }
 }
-fn ioWriteByte(self: *Memory, addr: usize, val: u8) void {
+fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
     return switch (addr) {
-        IF_OFF => self.io.IF = @bitCast(val),
-        SCY_OFF => self.io.SCY = val,
-        SCX_OFF => self.io.SCX = val,
-        STAT_OFF => self.io.STAT = @bitCast(val),
-        SB_OFF => std.log.err("Serial Transfer is not implemented :(", .{}),
-        SC_OFF => std.log.err("Serial Transfer is not implemented :(", .{}),
-        LCDC_OFF => self.io.LCDC = @bitCast(val),
+        IF_OFF => {
+            const v: IF = @bitCast(val);
+            std.log.info("setting IF to {}", .{v});
+            mem.io.IF = v;
+        },
+        SCY_OFF => {
+            std.log.info("setting SCY to {}", .{val});
+            mem.io.SCY = val;
+        },
+        SCX_OFF => {
+            std.log.info("setting SCX to {}", .{val});
+            mem.io.SCX = val;
+        },
+        STAT_OFF => {
+            const v: STAT = @bitCast(val);
+            std.log.info("setting STAT to {}", .{v});
+            mem.io.STAT = v;
+        },
+        SB_OFF => {
+            @breakpoint();
+            std.debug.print("{c}", .{val});
+        },
+        SC_OFF => std.log.warn("Serial Transfer is not implemented :(", .{}),
+        LCDC_OFF => {
+            const v: LCDC = @bitCast(val);
+            std.log.info("setting LCDC to {}", .{v});
+            mem.io.LCDC = v;
+        },
         LY_OFF => @panic("LY is read only"),
-        TIMA_OFF => self.io.TIMA = val,
-        TMA_OFF => self.io.TMA = val,
-        TAC_OFF => self.io.TAC = @bitCast(val),
-        LYC_OFF => self.io.LYC = val,
-        BGP_OFF => self.io.BGP = @bitCast(val),
-        OBP0_OFF => self.io.OBP0 = @bitCast(val),
-        OBP1_OFF => self.io.OBP1 = @bitCast(val),
-        WY_OFF => self.io.WY = val,
-        WX_OFF => self.io.WX = val,
-        0xFF10...0xFF26 => std.log.err("sound is not implemented yet :(", .{}),
-        else => std.debug.panic("unknown IO address: {X:0<4}", .{addr}),
+        TIMA_OFF => {
+            std.log.info("setting TIMA to {}", .{val});
+            mem.io.TIMA = val;
+        },
+        TMA_OFF => {
+            std.log.info("setting TMA to {}", .{val});
+            mem.io.TMA = val;
+        },
+        TAC_OFF => {
+            const v: TAC = @bitCast(val);
+            std.log.info("setting TAC to {}", .{v});
+            mem.io.TAC = v;
+        },
+        LYC_OFF => {
+            std.log.info("setting LYC to {}", .{val});
+            mem.io.LYC = val;
+        },
+        BGP_OFF => {
+            const v: BGP = @bitCast(val);
+            std.log.info("setting BGP to {}", .{v});
+            mem.io.BGP = v;
+        },
+        OBP0_OFF => {
+            const v: OBP = @bitCast(val);
+            std.log.info("setting OBP0 to {}", .{v});
+            mem.io.OBP0 = v;
+        },
+        OBP1_OFF => {
+            const v: OBP = @bitCast(val);
+            std.log.info("setting OBP1 to {}", .{v});
+            mem.io.OBP1 = v;
+        },
+        WY_OFF => {
+            std.log.info("setting WY to {}", .{val});
+            mem.io.WY = val;
+        },
+        WX_OFF => {
+            std.log.info("setting WX to {}", .{val});
+            mem.io.WX = val;
+        },
+        0xFF50 => {
+            if (mem.rom_mapped) mem.rom_mapped = false;
+            std.log.debug("--- ROM UNMAPPED ---", .{});
+            std.time.sleep(std.time.ns_per_s * 0.5);
+        },
+        0xFF7F => {},
+        0xFF10...0xFF26 => std.log.warn("sound is not implemented yet :(", .{}),
+        else => std.log.warn("unknown IO address: {X:0<4}", .{addr}),
     };
 }
 
-
-pub fn getTileMapAddr(self: Memory, idx: u8) u16 {
-    std.debug.print("idx: {}\n", .{idx});
-    switch (self.io.LCDC.bg_window_tile_data_area) {
+pub fn getTileMapAddr(mem: Memory, idx: u8) u16 {
+    //std.debug.print("idx: {}\n", .{idx});
+    switch (mem.io.LCDC.bg_window_tile_data_area) {
         0 => {
             const idx_i: i8 = @bitCast(idx);
             const idx_ib: i16 = @intCast(idx_i);
-            return @intCast(@as(i32, 0x9000) + idx_ib*16);
+            return @intCast(@as(i32, 0x9000) + idx_ib * 16);
         },
         1 => {
             const idx_b: u16 = @intCast(idx);
-            return @as(u16, 0x8000) + idx_b*16;
-        }
+            return @as(u16, 0x8000) + idx_b * 16;
+        },
     }
 }
