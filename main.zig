@@ -1,6 +1,6 @@
 const std = @import("std");
 const Ppu = @import("Ppu.zig");
-const Cpu = @import("Cpu.zig");
+pub const Cpu = @import("Cpu.zig");
 const Cart = @import("Cart.zig");
 
 
@@ -8,7 +8,7 @@ const SCREEN_WIDTH = 144;
 const SCREEN_HEIGHT = 160;
 
 pub const std_options = struct {
-    pub const log_level: std.log.Level = .debug;
+    pub const log_level: std.log.Level = .info;
 };
 
 
@@ -18,12 +18,12 @@ const c = @cImport({
 
 const KiB = 1024;
 
-const CART_IMAGE = @embedFile("1.gb");
+const CART_IMAGE = @embedFile("7.gb");
 
 pub fn main() !void {
 
-    //c.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "gb");
-    //defer c.CloseWindow();
+    c.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "gb");
+    defer c.CloseWindow();
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -37,7 +37,7 @@ pub fn main() !void {
     var ppu = Ppu{};
 
     const cart = Cart.init(CART_IMAGE);
-    if (false) {
+    if (true) {
         std.debug.print("name: {s}\n", .{cart.name});
         std.debug.print("rom size: {}\n", .{cart.rom_size});
         std.debug.print("ram size: {}\n", .{cart.ram_size});
@@ -55,11 +55,12 @@ pub fn main() !void {
             ppu.resetFrame(cpu.mem);
 
 
-            if (false) {
+            if (true) {
                 c.BeginDrawing();
                 for (0..SCREEN_HEIGHT) |y| {
                     for (0..SCREEN_WIDTH) |x| {
                         const col = switch (Ppu.FB[y*SCREEN_WIDTH+x]) {
+                            .transparent => c.Color{.a = 0},
                             .white => c.WHITE,
                             .black => c.BLACK,
                             .dark_grey => c.DARKGRAY,

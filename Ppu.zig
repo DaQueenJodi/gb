@@ -33,11 +33,12 @@ const Mode = enum {
     vblank,
 };
 
-const Color = enum(u2) {
-    white = 0,
-    light_grey = 1,
-    dark_grey = 2,
-    black = 3,
+const Color = enum {
+    transparent,
+    white,
+    light_grey,
+    dark_grey,
+    black,
 };
 
 pub fn tick(ppu: *Ppu, mem: *Memory) void {
@@ -129,6 +130,7 @@ fn loadWindowTileLine(mem: *Memory, addr_off: u16, line: usize) [2]u8 {
     };
     const idx = mem.readByte(wmap + addr_off);
     const addr = mem.getTileMapAddr(idx) + 2 * line;
+    std.log.info("WIN: {X:0>2}", .{idx});
     return .{ mem.readByte(addr), mem.readByte(addr + 1) };
 }
 fn loadBgTileLine(mem: *Memory, addr_off: u16, line: usize) [2]u8 {
@@ -138,6 +140,7 @@ fn loadBgTileLine(mem: *Memory, addr_off: u16, line: usize) [2]u8 {
         1 => 0x9C00,
     };
     const idx = mem.readByte(bmap + addr_off);
+    std.log.info("BG: {X:0>2}", .{idx});
     const addr = mem.getTileMapAddr(idx) + 2 * line;
     return .{ mem.readByte(addr), mem.readByte(addr + 1) };
 }
@@ -153,8 +156,20 @@ fn drawPixel(ppu: Ppu, mem: *Memory) void {
     const color = mem.io.BGP.get(color_id);
 
     if (ppu.is_window) {
-        FB[ppu.render_y * SCREEN_WIDTH + ppu.render_x] = @enumFromInt(color);
+        const real_color: Color = switch (color) {
+            0 => .white,
+            1 => .light_grey,
+            2 => .dark_grey,
+            3 => .black
+        };
+        FB[ppu.render_y * SCREEN_WIDTH + ppu.render_x] = real_color;
     } else {
-        FB[ppu.render_y * SCREEN_WIDTH + ppu.render_x] = @enumFromInt(color);
+        const real_color: Color = switch (color) {
+            0 => .transparent,
+            1 => .light_grey,
+            2 => .dark_grey,
+            3 => .black
+        };
+        FB[ppu.render_y * SCREEN_WIDTH + ppu.render_x] = real_color;
     }
 }

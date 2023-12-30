@@ -5,6 +5,7 @@ const Memory = @This();
 
 const KiB = 1024;
 
+sb_data: u8,
 rom_mapped: bool,
 bank0: [16 * KiB]u8,
 bank1: [16 * KiB]u8,
@@ -270,22 +271,19 @@ const IoRegs = struct {
     WY: u8,
 };
 
+const log_checking = false;
 fn ioReadByte(mem: Memory, addr: usize) u8 {
     switch (addr) {
         IF_OFF => {
-            std.log.info("checking IF: {}", .{mem.io.IF});
             return @bitCast(mem.io.IF);
         },
         SCY_OFF => {
-            std.log.info("checking SCY: {}", .{mem.io.SCY});
             return mem.io.SCY;
         },
         SCX_OFF => {
-            std.log.info("checking SCX: {}", .{mem.io.SCX});
             return mem.io.SCX;
         },
         STAT_OFF => {
-            std.log.info("checking STAT: {}", .{mem.io.STAT});
             return @bitCast(mem.io.STAT);
         },
         SB_OFF => {
@@ -297,39 +295,30 @@ fn ioReadByte(mem: Memory, addr: usize) u8 {
             return 0x00;
         },
         LCDC_OFF => {
-            std.log.info("checking LCDC: {}", .{mem.io.LCDC});
             return @bitCast(mem.io.LCDC);
         },
         LY_OFF => {
-            std.log.info("checking LY: {}", .{mem.io.LY});
             return mem.io.LY;
         },
         TIMA_OFF => {
-            std.log.info("checking TIMA: {}", .{mem.io.TIMA});
             return mem.io.TIMA;
         },
         TMA_OFF => {
-            std.log.info("checking TMA: {}", .{mem.io.TMA});
             return mem.io.TMA;
         },
         TAC_OFF => {
-            std.log.info("checking TAC: {}", .{mem.io.TAC});
             return @bitCast(mem.io.TAC);
         },
         LYC_OFF => {
-            std.log.info("checking LYC: {}", .{mem.io.LYC});
             return mem.io.LYC;
         },
         BGP_OFF => {
-            std.log.info("checking BGP: {}", .{mem.io.BGP});
             return @bitCast(mem.io.BGP);
         },
         OBP0_OFF => {
-            std.log.info("checking OBP0: {}", .{mem.io.OBP0});
             return @bitCast(mem.io.OBP0);
         },
         OBP1_OFF => {
-            std.log.info("checking OBP1: {}", .{mem.io.OBP1});
             return @bitCast(mem.io.OBP1);
         },
         0xFF10...0xFF26 => {
@@ -346,33 +335,31 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
     return switch (addr) {
         IF_OFF => {
             const v: IF = @bitCast(val);
-            std.log.info("setting IF to {}", .{v});
             mem.io.IF = v;
         },
         SCY_OFF => {
-            std.log.info("setting SCY to {}", .{val});
             mem.io.SCY = val;
         },
         SCX_OFF => {
-            std.log.info("setting SCX to {}", .{val});
             mem.io.SCX = val;
         },
         STAT_OFF => {
             const v: STAT = @bitCast(val);
-            std.log.info("setting STAT to {}", .{v});
             mem.io.STAT = v;
         },
         SB_OFF => {
-            @breakpoint();
-            std.debug.print("{c}", .{val});
+            mem.sb_data = val;
         },
-        SC_OFF => std.log.warn("Serial Transfer is not implemented :(", .{}),
+        SC_OFF => {
+            if (val == 0x81) std.io.getStdOut().writeAll(&.{mem.sb_data}) catch unreachable;
+            mem.sb_data = 0;
+        },
         LCDC_OFF => {
             const v: LCDC = @bitCast(val);
             std.log.info("setting LCDC to {}", .{v});
             mem.io.LCDC = v;
         },
-        LY_OFF => @panic("LY is read only"),
+        LY_OFF => std.log.warn("trying to write to LY which is read only", .{}),
         TIMA_OFF => {
             std.log.info("setting TIMA to {}", .{val});
             mem.io.TIMA = val;

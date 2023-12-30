@@ -2,7 +2,7 @@ const std = @import("std");
 
 const Registers = @This();
 
-const FlagRegister = packed struct {
+pub const FlagRegister = packed struct {
     _padding: u4,
     c: bool,
     h: bool,
