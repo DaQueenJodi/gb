@@ -2,11 +2,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
-
-
 const Registers = @import("Registers.zig");
 const Memory = @import("Memory.zig");
-const instructions = @import("instructions");
 
 const Cpu = @This();
 
@@ -24,18 +21,6 @@ pub fn create(allocator: Allocator) !Cpu {
 }
 pub fn deinit(cpu: Cpu, allocator: Allocator) void {
     allocator.destroy(cpu.mem);
-}
-
-pub fn execNextInstruction(cpu: *Cpu) usize {
-    if (cpu.regs.get("PC") == 0xC243) @breakpoint();
-    const ime_was_scheduled = cpu.ime_scheduled;
-    const opcode = cpu.nextByte();
-    const cycles =  instructions.exec(cpu, opcode);
-    if (ime_was_scheduled) {
-        cpu.ime_scheduled = false;
-        cpu.regs.ime = true;
-    }
-    return cycles;
 }
 
 pub fn nextByte(cpu: *Cpu) u8 {

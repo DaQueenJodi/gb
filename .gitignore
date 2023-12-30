@@ -1,4 +1,5 @@
 *.gb
+tests/jsmoo
 dmg_boot.bin
 zig-out
 zig-cache

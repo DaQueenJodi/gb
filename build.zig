@@ -19,7 +19,6 @@ pub fn build(b: *std.Build) void {
     exe.linkLibC();
     exe.linkSystemLibrary("raylib");
 
-
     const generater = b.addExecutable(.{
         .name = "generate_instruction_logs",
         .root_source_file = .{ .path = "generate_instruction_logs.zig" },
@@ -30,12 +29,25 @@ pub fn build(b: *std.Build) void {
 
     const log_instrs = b.option(bool, "log_instrs", "") orelse true;
 
+    const original_instructions_src = std.build.LazyPath{ .path = "instructions.zig" };
+    const instructions_src: std.build.LazyPath = if (log_instrs) generated_instructions else original_instructions_src;
 
-    const instructions_src: std.build.LazyPath = if (log_instrs) generated_instructions else .{.path = "instructions.zig"};
-    exe.addAnonymousModule("instructions", .{
-        .source_file = instructions_src
+    const hardware = b.createModule(.{
+        .source_file = .{ .path = "hardware.zig" },
+    });
+    const instructions = b.addModule("instructions", .{
+        .source_file = instructions_src,
+        .dependencies = &.{.{ .name = "gameboy", .module = hardware }},
+    });
+    const gameboy = b.createModule(.{
+        .source_file = .{ .path = "gameboy.zig" },
+        .dependencies = &.{
+            .{ .name = "hardware", .module = hardware },
+            .{ .name = "instructions", .module = instructions },
+        },
     });
 
+    exe.addModule("gameboy", gameboy);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -50,10 +62,11 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     const exe_unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "main.zig" },
+        .root_source_file = .{ .path = "jsmoo_tests.zig" },
         .target = target,
         .optimize = optimize,
     });
+    exe_unit_tests.addModule("gameboy", gameboy);
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 

@@ -1,8 +1,9 @@
 const std = @import("std");
-const Ppu = @import("Ppu.zig");
-pub const Cpu = @import("Cpu.zig");
-const Cart = @import("Cart.zig");
-
+const GB = @import("gameboy");
+const Ppu = GB.Ppu;
+const Cpu = GB.Cpu;
+const execNextInstruction = GB.execNextInstruction;
+const Cart = GB.Cart;
 
 const SCREEN_WIDTH = 144;
 const SCREEN_HEIGHT = 160;
@@ -10,7 +11,6 @@ const SCREEN_HEIGHT = 160;
 pub const std_options = struct {
     pub const log_level: std.log.Level = .info;
 };
-
 
 const c = @cImport({
     @cInclude("raylib.h");
@@ -47,7 +47,7 @@ pub fn main() !void {
 
     var timer = try std.time.Timer.start();
     while (true) {
-        const cycles = cpu.execNextInstruction();
+        const cycles = execNextInstruction(&cpu);
         for (0..cycles) |_| {
             ppu.tick(cpu.mem);
         }
