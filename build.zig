@@ -1,4 +1,15 @@
 const std = @import("std");
+const Module = std.build.Module;
+
+pub fn gameboy(b: *std.build, hardware: *Module, instructions: *Module) *std.build.Module {
+    return b.createModule(.{
+        .source_file = .{ .path = "gameboy.zig" },
+        .dependencies = &.{
+            .{ .name = "hardware", .module = hardware },
+            .{ .name = "instructions", .module = instructions },
+        },
+    });
+}
 
 pub fn build(b: *std.Build) void {
     const llvm = b.option(bool, "llvm", "") orelse false;
@@ -24,30 +35,30 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .path = "generate_instruction_logs.zig" },
     });
 
-    const generater_step = b.addRunArtifact(generater);
-    const generated_instructions = generater_step.addOutputFileArg("generated_instructions");
-
     const log_instrs = b.option(bool, "log_instrs", "") orelse true;
 
-    const original_instructions_src = std.build.LazyPath{ .path = "instructions.zig" };
-    const instructions_src: std.build.LazyPath = if (log_instrs) generated_instructions else original_instructions_src;
+    const generater_step = b.addRunArtifact(generater);
+    const generated_instructions_file = generater_step.addOutputFileArg("generated_instructions");
 
     const hardware = b.createModule(.{
-        .source_file = .{ .path = "hardware.zig" },
+        .source_file = .{ .path = "hardware/hardware.zig" },
     });
-    const instructions = b.addModule("instructions", .{
-        .source_file = instructions_src,
-        .dependencies = &.{.{ .name = "gameboy", .module = hardware }},
+    const instructions_deps = &.{
+        std.build.ModuleDependency{ .name = "hardware", .module = hardware },
+    };
+    const original_instructions = b.createModule(.{
+        .source_file = .{ .path = "instructions.zig" },
+        .dependencies = instructions_deps,
     });
-    const gameboy = b.createModule(.{
-        .source_file = .{ .path = "gameboy.zig" },
-        .dependencies = &.{
-            .{ .name = "hardware", .module = hardware },
-            .{ .name = "instructions", .module = instructions },
-        },
+    const generated_instructions = b.createModule(.{
+        .source_file = generated_instructions_file,
+        .dependencies = instructions_deps,
     });
 
-    exe.addModule("gameboy", gameboy);
+    const gameboy_with_logs = gameboy(b, hardware, generated_instructions);
+    const gameboy_without_logs = gameboy(b, hardware, original_instructions);
+
+    exe.addModule("gameboy", if (log_instrs) gameboy_with_logs else gameboy_without_logs);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -62,11 +73,12 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     const exe_unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "jsmoo_tests.zig" },
+        .root_source_file = .{ .path = "tests/jsmoo_tests.zig" },
         .target = target,
         .optimize = optimize,
     });
-    exe_unit_tests.addModule("gameboy", gameboy);
+    // never use logs for unit tests
+    exe_unit_tests.addModule("gameboy", gameboy_without_logs);
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 

@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const Cpu = @import("gameboy").Cpu;
+const Cpu = @import("hardware").Cpu;
 
 /// returns the number of clock cycles it should take to execute
 pub fn exec(cpu: *Cpu, opcode: u8) usize {

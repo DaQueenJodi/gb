@@ -18,7 +18,7 @@ io: IoRegs,
 hram: [0x7F]u8,
 ie: IE,
 
-const BOOT_ROM = @embedFile("dmg_boot.bin");
+const BOOT_ROM = @embedFile("bootroms/dmg_boot.bin");
 
 pub fn create__(allocator: Allocator) !*Memory {
     const mem = try allocator.create(Memory);
