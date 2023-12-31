@@ -38,7 +38,7 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
         0x32 => {
             const hl = cpu.regs.get("HL");
             cpu.mem.writeByte(hl, cpu.regs.get("A"));
-            cpu.regs.set("HL", hl-%1);
+            cpu.regs.set("HL", hl -% 1);
             return 8;
         },
         // DEC B
@@ -757,15 +757,17 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
         },
         // ADD SP, r8
         0xE8 => {
-            const n: u8 = cpu.nextByte();
+            const n: i8 = cpu.nextSignedByte();
+            const n16: i16 = @intCast(n);
             const sp = cpu.regs.get("SP");
-            const res = sp +% n;
-
+            const sp_i: i32 = @intCast(sp);
+            const res_32: u32 = @bitCast(sp_i +% n16);
+            const res: u16 = @truncate(res_32);
+            cpu.regs.set("SP", res);
             cpu.regs.set_z(false);
             cpu.regs.set_n(false);
-            const hc = (sp & 0x000F) + (n & 0x000f) == 0x10;
-            cpu.regs.set_h(hc);
-            cpu.regs.set_c(res < sp);
+            cpu.regs.set_h(Cpu.addHalfCarry8(@truncate(sp), @bitCast(n)));
+            cpu.regs.set_c((@as(u8, @truncate(sp)) > @as(u8, @truncate(res))));
             return 16;
         },
         // LD HL, SP+r8
@@ -774,16 +776,14 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
             const n16: i16 = @intCast(n);
             const sp = cpu.regs.get("SP");
             const sp_i: i32 = @intCast(sp);
-            const res: u16 = @intCast(sp_i + n16);
-
-            const c = (sp_i & 0x000000FF) + n > 0xFF;
-            const sp_low_i: i8 = @intCast(sp & 0x000F);
-            const hc = sp_low_i + (n & 0x0F) > 0x0F;
+            const res_32: u32 = @bitCast(sp_i +% n16);
+            const res: u16 = @truncate(res_32);
             cpu.regs.set("HL", res);
+
             cpu.regs.set_z(false);
             cpu.regs.set_n(false);
-            cpu.regs.set_h(hc);
-            cpu.regs.set_c(c);
+            cpu.regs.set_h(Cpu.addHalfCarry8(@truncate(sp), @bitCast(n)));
+            cpu.regs.set_c((@as(u8, @truncate(sp)) > @as(u8, @truncate(res))));
             return 12;
         },
         // SCF
@@ -853,7 +853,7 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
             }
             return 12;
         },
-        // 
+        //
         0xDC => {
             const addr = cpu.nextBytes();
             if (cpu.regs.get_c()) {
@@ -914,7 +914,7 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
             cpu.mem.writeByte(cpu.regs.get("BC"), cpu.regs.get("A"));
             return 8;
         },
-        // RLCA 
+        // RLCA
         0x07 => {
             cpu.rlc("A");
             cpu.regs.set_z(false);
@@ -1391,20 +1391,6 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
 
 fn prefixed(cpu: *Cpu, opcode: u8) usize {
     switch (opcode) {
-        // BIT 7, H
-        0x7C => {
-            const h = cpu.regs.get("H");
-            const b = h & (0x01 << 7);
-            cpu.regs.set_z(b > 0);
-            cpu.regs.set_n(false);
-            cpu.regs.set_h(true);
-            return 8;
-        },
-        // SET 1, L
-        0xCD => {
-            cpu.regs.set("L", cpu.regs.get("L") | (0x1 << 0));
-            return 8;
-        },
         // RR D
         0x1A => {
             cpu.rr("D");
@@ -1438,6 +1424,436 @@ fn prefixed(cpu: *Cpu, opcode: u8) usize {
             cpu.regs.set_n(false);
             return 8;
         },
-        else => std.debug.panic("invalid prefixed opcode: {X:0>2}", .{opcode})
+        // RLC B
+        0x00 => {
+            cpu.rlc("B");
+            return 8;
+        },
+        // RLC C
+        0x01 => {
+            cpu.rlc("C");
+            return 8;
+        },
+        // RLC D
+        0x02 => {
+            cpu.rlc("D");
+            return 8;
+        },
+        // RLC E
+        0x03 => {
+            cpu.rlc("E");
+            return 8;
+        },
+        // RLC H
+        0x04 => {
+            cpu.rlc("H");
+            return 8;
+        },
+        // RLC L
+        0x05 => {
+            cpu.rlc("L");
+            return 8;
+        },
+        // RLC (HL)
+        0x06 => {
+            const addr = cpu.regs.get("HL");
+            const orig = cpu.mem.readByte(addr);
+            const masked: u8 = orig & (0x01 << 7);
+            const b7: u1 = @intCast(masked >> 7);
+            const shifted = orig << 1;
+            const res = (shifted | b7);
+            cpu.mem.writeByte(addr, res);
+            cpu.regs.set_z(res == 0);
+            cpu.regs.set_n(false);
+            cpu.regs.set_h(false);
+            cpu.regs.set_c(b7 == 1);
+            return 16;
+        },
+        // RLC A
+        0x07 => {
+            cpu.rlc("A");
+            return 8;
+        },
+        // RRC B
+        0x08 => {
+            cpu.rrc("B");
+            return 8;
+        },
+        // RRC C
+        0x09 => {
+            cpu.rrc("C");
+            return 8;
+        },
+        // RRC D
+        0x0A => {
+            cpu.rrc("D");
+            return 8;
+        },
+        // RRC E
+        0x0B => {
+            cpu.rrc("E");
+            return 8;
+        },
+        // RRC H
+        0x0C => {
+            cpu.rrc("H");
+            return 8;
+        },
+        // RRC L
+        0x0D => {
+            cpu.rrc("L");
+            return 8;
+        },
+        // RRC (HL)
+        0x0E => {
+            const addr = cpu.regs.get("HL");
+            const orig = cpu.mem.readByte(addr);
+            const b0: u8 = @intCast(orig & 0x01);
+            const shifted = orig >> 1;
+            const res = (shifted | (b0 << 7));
+            cpu.mem.writeByte(addr, res);
+            cpu.regs.set_z(res == 0);
+            cpu.regs.set_n(false);
+            cpu.regs.set_h(false);
+            cpu.regs.set_c(b0 == 1);
+            return 16;
+        },
+        // RRC A
+        0x0F => {
+            cpu.rrc("A");
+            return 8;
+        },
+        // RL B
+        0x10 => {
+            cpu.rl("B");
+            return 8;
+        },
+        // RL C
+        0x11 => {
+            cpu.rl("C");
+            return 8;
+        },
+        // RL D
+        0x12 => {
+            cpu.rl("D");
+            return 8;
+        },
+        // RL E
+        0x13 => {
+            cpu.rl("E");
+            return 8;
+        },
+        // RL H
+        0x14 => {
+            cpu.rl("H");
+            return 8;
+        },
+        // RL L
+        0x15 => {
+            cpu.rl("L");
+            return 8;
+        },
+        // RL (HL)
+        0x16 => {
+            const addr = cpu.regs.get("HL");
+            const val = cpu.mem.readByte(addr);
+
+            const c: u8 = @intFromBool(cpu.regs.get_c());
+            const old_b7 = (val & (0x01 << 7)) >> 7;
+
+            const shifted = val << 1;
+            const res = shifted | c;
+            cpu.mem.writeByte(addr, res);
+
+            cpu.regs.set_z(res == 0);
+            cpu.regs.set_n(false);
+            cpu.regs.set_h(false);
+            cpu.regs.set_c(old_b7 == 1);
+            return 16;
+        },
+        // RL A
+        0x17 => {
+            cpu.rl("A");
+            return 8;
+        },
+        // RR B
+        0x18 => {
+            cpu.rr("B");
+            return 8;
+        },
+        // RR H
+        0x1C => {
+            cpu.rr("H");
+            return 8;
+        },
+        // RR L
+        0x1D => {
+            cpu.rr("L");
+            return 8;
+        },
+        // RR (HL)
+        0x1E => {
+            const addr = cpu.regs.get("HL");
+            const val = cpu.mem.readByte(addr);
+
+            const c: u8 = @intFromBool(cpu.regs.get_c());
+            const old_b0 = val & 0x01;
+
+            const shifted = val >> 1;
+            const res = shifted | (c << 7);
+            cpu.mem.writeByte(addr, res);
+            cpu.regs.set_z(res == 0);
+            cpu.regs.set_n(false);
+            cpu.regs.set_h(false);
+            cpu.regs.set_c(old_b0 == 1);
+            return 16;
+        },
+        // RR A
+        0x1F => {
+            cpu.rr("A");
+            return 8;
+        },
+        // SLA B
+        0x20 => {
+            cpu.sla("B");
+            return 8;
+        },
+        // SLA C
+        0x21 => {
+            cpu.sla("C");
+            return 8;
+        },
+        // SLA D
+        0x22 => {
+            cpu.sla("D");
+            return 8;
+        },
+        // SLA E
+        0x23 => {
+            cpu.sla("E");
+            return 8;
+        },
+        // SLA H
+        0x24 => {
+            cpu.sla("H");
+            return 8;
+        },
+        // SLA L
+        0x25 => {
+            cpu.sla("L");
+            return 8;
+        },
+        // SLA (HL)
+        0x26 => {
+            const addr = cpu.regs.get("HL");
+            const orig = cpu.mem.readByte(addr);
+            const old_b7 = (orig & (0x01 << 7)) >> 7;
+            const res = orig << 1;
+            cpu.mem.writeByte(addr, res);
+            cpu.regs.set_z(res == 0);
+            cpu.regs.set_n(false);
+            cpu.regs.set_h(false);
+            cpu.regs.set_c(old_b7 == 1);
+            return 16;
+        },
+        // SLA A
+        0x27 => {
+            cpu.sla("A");
+            return 8;
+        },
+
+        // SRA B
+        0x28 => {
+            cpu.sra("B");
+            return 8;
+        },
+        // SRA C
+        0x29 => {
+            cpu.sra("C");
+            return 8;
+        },
+        // SRA D
+        0x2A => {
+            cpu.sra("D");
+            return 8;
+        },
+        // SRA E
+        0x2B => {
+            cpu.sra("E");
+            return 8;
+        },
+        // SRA H
+        0x2C => {
+            cpu.sra("H");
+            return 8;
+        },
+        // SRA L
+        0x2D => {
+            cpu.sra("L");
+            return 8;
+        },
+        // SRA (HL)
+        0x2E => {
+            const addr = cpu.regs.get("HL");
+            const orig = cpu.mem.readByte(addr);
+            const old_b7 = orig & (0x01 << 7);
+            const old_b0 = orig & 0x01;
+            const res = (orig >> 1) | old_b7;
+            cpu.mem.writeByte(addr, res);
+            cpu.regs.set_z(res == 0);
+            cpu.regs.set_n(false);
+            cpu.regs.set_h(false);
+            cpu.regs.set_c(old_b0 == 1);
+            return 16;
+        },
+        // SRA A
+        0x2F => {
+            cpu.sra("A");
+            return 8;
+        },
+        // SWAP B
+        0x30 => {
+            cpu.swap("B");
+            return 8;
+        },
+        // SWAP C
+        0x31 => {
+            cpu.swap("C");
+            return 8;
+        },
+        // SWAP D
+        0x32 => {
+            cpu.swap("D");
+            return 8;
+        },
+        // SWAP E
+        0x33 => {
+            cpu.swap("E");
+            return 8;
+        },
+        // SWAP H
+        0x34 => {
+            cpu.swap("H");
+            return 8;
+        },
+        // SWAP L
+        0x35 => {
+            cpu.swap("L");
+            return 8;
+        },
+        // SWAP (HL)
+        0x36 => {
+            const addr = cpu.regs.get("HL");
+            const orig = cpu.mem.readByte(addr);
+            const h = (orig & 0xF0) >> 4;
+            const l = orig & 0x0F;
+            const res = (l << 4) | h;
+            cpu.mem.writeByte(addr, res);
+            cpu.regs.set_z(res == 0);
+            cpu.regs.set_n(false);
+            cpu.regs.set_h(false);
+            cpu.regs.set_c(false);
+            return 16;
+        },
+        // SRL C
+        0x39 => {
+            cpu.srl("C");
+            return 8;
+        },
+        // SRL D
+        0x3A => {
+            cpu.srl("D");
+            return 8;
+        },
+        // SRL E
+        0x3B => {
+            cpu.srl("E");
+            return 8;
+        },
+        // SRL H
+        0x3C => {
+            cpu.srl("H");
+            return 8;
+        },
+        // SRL L
+        0x3D => {
+            cpu.srl("L");
+            return 8;
+        },
+        // SRL (HL)
+        0x3E => {
+            const addr = cpu.regs.get("HL");
+            const orig = cpu.mem.readByte(addr);
+            const old_b0 = orig & 0x01;
+            const res = orig >> 1;
+            cpu.mem.writeByte(addr, res);
+            cpu.regs.set_z(res == 0);
+            cpu.regs.set_n(false);
+            cpu.regs.set_h(false);
+            cpu.regs.set_c(old_b0 == 1);
+            return 16;
+        },
+        // SRL A
+        0x3F => {
+            cpu.srl("A");
+            return 8;
+        },
+        inline 0x40...0x7F => |op| {
+            const off = op - 0x40;
+            const bit_idx = @divFloor(off, 8);
+            const operand_off = @mod(off, 8);
+            const OPERAND_TABLE = [_]?[]const u8{
+                "B", "C", "D", "E", "H", "L", null, "A",
+            };
+            if (OPERAND_TABLE[operand_off]) |r| {
+                const v = cpu.regs.get(r);
+                cpu.bit(v, bit_idx);
+                return 8;
+            } else {
+                const v = cpu.mem.readByte(cpu.regs.get("HL"));
+                cpu.bit(v, bit_idx);
+                return 12;
+            }
+        },
+        inline 0x80...0xBF => |op| {
+            const off = op - 0x80;
+            const bit_idx: u3 = @divFloor(off, 8);
+            const operand_off = @mod(off, 8);
+            const OPERAND_TABLE = [_]?[]const u8{
+                "B", "C", "D", "E", "H", "L", null, "A",
+            };
+            if (OPERAND_TABLE[operand_off]) |r| {
+                const orig = cpu.regs.get(r);
+                const mask = ~(@as(u8, 0x01) << bit_idx);
+                cpu.regs.set(r, orig & mask);
+                return 8;
+            } else {
+                const addr = cpu.regs.get("HL");
+                const v = cpu.mem.readByte(addr);
+                const mask = ~(@as(u8, 0x01) << bit_idx);
+                cpu.mem.writeByte(addr, v & mask);
+                return 16;
+            }
+        },
+        inline 0xC0...0xFF => |op| {
+            const off = op - 0xC0;
+            const bit_idx: u3 = @divFloor(off, 8);
+            const operand_off = @mod(off, 8);
+            const OPERAND_TABLE = [_]?[]const u8{
+                "B", "C", "D", "E", "H", "L", null, "A",
+            };
+            if (OPERAND_TABLE[operand_off]) |r| {
+                const orig = cpu.regs.get(r);
+                const mask = @as(u8, 0x01) << bit_idx;
+                cpu.regs.set(r, orig | mask);
+                return 8;
+            } else {
+                const addr = cpu.regs.get("HL");
+                const v = cpu.mem.readByte(addr);
+                const mask = @as(u8, 0x01) << bit_idx;
+                cpu.mem.writeByte(addr, v | mask);
+                return 16;
+            }
+        }
     }
 }

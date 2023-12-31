@@ -18,13 +18,9 @@ const c = @cImport({
 
 const KiB = 1024;
 
-const CART_IMAGE = @embedFile("roms/1.gb");
+const CART_IMAGE = @embedFile("roms/hello_world.gb");
 
 pub fn main() !void {
-    try testing();
-}
-
-pub fn main1() !void {
     c.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "gb");
     defer c.CloseWindow();
 
@@ -34,9 +30,9 @@ pub fn main1() !void {
 
     var cpu = try Cpu.create(allocator);
     defer cpu.deinit(allocator);
-    @memcpy(&cpu.mem.bank0, CART_IMAGE[0 .. 16 * KiB]);
-    @memcpy(&cpu.mem.bank1, CART_IMAGE[16 * KiB ..]);
-
+    for (CART_IMAGE[0x100..], 0x100..) |b, i| {
+        cpu.mem.writeByte(i, b);
+    }
     var ppu = Ppu{};
 
     const cart = Cart.init(CART_IMAGE);
@@ -183,22 +179,17 @@ fn readFile(alloc: Allocator, path: []const u8) ![]const u8 {
     _ = try f.readAll(buf);
     return buf;
 }
-const TESTS_IGNORE = [_]u8{
-    // TODO
-    0xE8,
-};
 
-const TEST_FILES_COUNT = 500;
-const TEST_FILE_PATHS: [500][]const u8 = blk: {
-    var arr: [500][]const u8 = undefined;
+const TEST_FILES_COUNT = 498;
+const TEST_FILE_PATHS: [TEST_FILES_COUNT][]const u8 = blk: {
+    var arr: [TEST_FILES_COUNT][]const u8 = undefined;
     var arr_i: usize = 0;
     // opcodes that dont exist
     const exceptions = [12]u8{
         0xD3, 0xE3, 0xE4, 0xF4, 0xDB, 0xEB, 0xEC, 0xFC, 0xFD, 0xED, 0xDD, 0xCB
     };
     for (0..0xFF) |b| {
-        if (std.mem.indexOfScalar(u8, &exceptions, b) == null and
-            std.mem.indexOfScalar(u8, &TESTS_IGNORE, b) == null)
+        if (std.mem.indexOfScalar(u8, &exceptions, b) == null)
         {
             arr[arr_i] = std.fmt.comptimePrint("tests/jsmoo/{x:0>2}.json.zst", .{b});
             arr_i += 1;
@@ -206,10 +197,9 @@ const TEST_FILE_PATHS: [500][]const u8 = blk: {
     }
     // CB prefixed
     for (0..0xFF) |b| {
-        arr[arr_i] = std.fmt.comptimePrint("tests/jsmoo/CB {x:0>2}.json.zst", .{b});
+        arr[arr_i] = std.fmt.comptimePrint("tests/jsmoo/cb {x:0>2}.json.zst", .{b});
         arr_i += 1;
     }
-
     break :blk arr;
 };
 
@@ -242,7 +232,7 @@ fn testing() !void {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    for (TEST_FILE_PATHS, 1..) |path, t_i| {
+    for (TEST_FILE_PATHS, 0..) |path, t_i| {
         if (t_i < test_nr) continue;
         std.debug.print("{s}\n", .{path});
         const file = try std.fs.cwd().openFile(path, .{});
@@ -269,4 +259,5 @@ fn testing() !void {
         _ = arena.reset(.retain_capacity);
         std.debug.print("passed: {}!\n", .{t_i});
     }
+    std.debug.print("passed {} tests!", .{TEST_FILES_COUNT - test_nr});
 }

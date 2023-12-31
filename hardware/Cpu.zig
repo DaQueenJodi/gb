@@ -7,12 +7,7 @@ const Memory = @import("Memory.zig");
 
 const Cpu = @This();
 
-
-const CpuMode = enum {
-    halt,
-    stop,
-    normal
-};
+const CpuMode = enum { halt, stop, normal };
 
 mode: CpuMode = .normal,
 ime_scheduled: bool,
@@ -49,7 +44,6 @@ pub fn nextBytes(cpu: *Cpu) u16 {
     cpu.regs.pc +%= 2;
     return bs;
 }
-
 
 pub fn pushBytes(cpu: *Cpu, bytes: u16) void {
     std.log.debug("PUSH", .{});
@@ -211,7 +205,7 @@ pub fn inc(cpu: *Cpu, comptime s: []const u8) void {
 }
 
 pub fn rr(cpu: *Cpu, comptime s: []const u8) void {
-   const val = cpu.regs.get(s);
+    const val = cpu.regs.get(s);
 
     const c: u8 = @intFromBool(cpu.regs.get_c());
     const old_b0 = val & 0x01;
@@ -226,7 +220,7 @@ pub fn rr(cpu: *Cpu, comptime s: []const u8) void {
 }
 
 pub fn rl(cpu: *Cpu, comptime s: []const u8) void {
-   const val = cpu.regs.get(s);
+    const val = cpu.regs.get(s);
 
     const c: u8 = @intFromBool(cpu.regs.get_c());
     const old_b7 = (val & (0x01 << 7)) >> 7;
@@ -264,6 +258,38 @@ pub fn rrc(cpu: *Cpu, comptime s: []const u8) void {
     cpu.regs.set_h(false);
     cpu.regs.set_c(b0 == 1);
 }
+pub fn sla(cpu: *Cpu, comptime s: []const u8) void {
+    const orig = cpu.regs.get(s);
+    const old_b7 = (orig & (0x01 << 7)) >> 7;
+    const res = orig << 1;
+    cpu.regs.set(s, res);
+    cpu.regs.set_z(res == 0);
+    cpu.regs.set_n(false);
+    cpu.regs.set_h(false);
+    cpu.regs.set_c(old_b7 == 1);
+}
+pub fn sra(cpu: *Cpu, comptime s: []const u8) void {
+    const orig = cpu.regs.get(s);
+    const old_b0 = orig & 0x01;
+    const old_b7 = orig & (0x01 << 7);
+    const res = (orig >> 1) | old_b7;
+    cpu.regs.set(s, res);
+    cpu.regs.set_z(res == 0);
+    cpu.regs.set_n(false);
+    cpu.regs.set_h(false);
+    cpu.regs.set_c(old_b0 == 1);
+}
+pub fn swap(cpu: *Cpu, comptime s: []const u8) void {
+    const orig = cpu.regs.get(s);
+    const h = (orig & 0xF0) >> 4;
+    const l = orig & 0x0F;
+    const res = (l << 4) | h;
+    cpu.regs.set(s, res);
+    cpu.regs.set_z(res == 0);
+    cpu.regs.set_n(false);
+    cpu.regs.set_h(false);
+    cpu.regs.set_c(false);
+}
 pub fn sub(cpu: *Cpu, val: u8) void {
     const a = cpu.regs.get("A");
     const res = a -% val;
@@ -284,5 +310,18 @@ pub fn cp(cpu: *Cpu, val: u8) void {
 
 pub fn srl(cpu: *Cpu, comptime s: []const u8) void {
     const v = cpu.regs.get(s);
-    cpu.regs.set(s, v << 1);
+    const old_b0 = v & 0x01;
+    const res = v >> 1;
+    cpu.regs.set(s, res);
+    cpu.regs.set_z(res == 0);
+    cpu.regs.set_n(false);
+    cpu.regs.set_h(false);
+    cpu.regs.set_c(old_b0 == 1);
+}
+pub fn bit(cpu: *Cpu, v: u8, n: u3) void {
+    const mask = @as(u8, 0x01) << n;
+    const b = (v & mask) == mask;
+    cpu.regs.set_z(!b);
+    cpu.regs.set_n(false);
+    cpu.regs.set_h(true);
 }

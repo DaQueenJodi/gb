@@ -6,14 +6,10 @@ const Ppu = @This();
 
 const TileFlavor = enum { bg, window };
 
-curr_tile_line: [2]u8 = undefined,
-curr_tile_x: usize = 0,
-curr_tile_index_in_map: usize = 0,
-is_window: bool = false,
+
+fetcher: Fetcher = .{},
 wy_condition: bool = false,
-render_x: usize = 0,
-render_y: usize = 0,
-penalties: usize = 0,
+x: usize = 0,
 mode: Mode = .oam_scan,
 dots_count: usize = 0,
 
@@ -45,7 +41,6 @@ pub fn tick(ppu: *Ppu, mem: *Memory) void {
     if (!mem.io.LCDC.lcd_ppu_enable) return;
 
     const scanline_dots = @mod(ppu.dots_count, DOTS_PER_SCANLINE+1);
-
     switch (ppu.mode) {
         .oam_scan => {
             if (mem.io.LY == mem.io.WX) {
@@ -63,30 +58,7 @@ pub fn tick(ppu: *Ppu, mem: *Memory) void {
             }
         },
         .drawing => {
-            if (ppu.wy_condition and
-                mem.io.LCDC.window_enable and
-                mem.io.LCDC.bg_window_enable and
-                ppu.render_x + 7 == mem.io.WX)
-            {
-                // set up for window drawing
-                //std.debug.print("drawing window!\n", .{});
-                ppu.is_window = true;
-                ppu.curr_tile_x = 0;
-                ppu.curr_tile_line = loadWindowTileLine(mem, 0, 0);
-            }
-            ppu.drawPixel(mem);
-            ppu.render_x += 1;
-            ppu.curr_tile_x += 1;
-            if (ppu.curr_tile_x == 8) {
-                ppu.curr_tile_x = 0;
-                ppu.curr_tile_line = switch (ppu.is_window) {
-                    true => loadWindowTileLine(mem, @intCast(ppu.curr_tile_index_in_map + 1), @mod(ppu.render_y - mem.io.WY, 8)),
-                    false => loadBgTileLine(mem, @intCast(ppu.curr_tile_index_in_map + 1), @mod(ppu.render_y + mem.io.SCY, 8)),
-                };
-            }
-            if (scanline_dots == DRAWING_END_BASE + ppu.penalties) {
-                ppu.mode = .hblank;
-            }
+            ppu.fetcher.tick();
         },
         .hblank => {
             if (scanline_dots == DOTS_PER_SCANLINE) {
@@ -165,11 +137,69 @@ fn drawPixel(ppu: Ppu, mem: *Memory) void {
         FB[ppu.render_y * SCREEN_WIDTH + ppu.render_x] = real_color;
     } else {
         const real_color: Color = switch (color) {
-            0 => .transparent,
+            0 => .white,
             1 => .light_grey,
             2 => .dark_grey,
             3 => .black
         };
         FB[ppu.render_y * SCREEN_WIDTH + ppu.render_x] = real_color;
+    }
+}
+
+
+
+const PixelProperties = struct {
+    color: u2,
+    palette: u3,
+    priority_bit: u1,
+};
+const FIFO = struct {
+    pixels: std.ArrayListUnmanaged(PixelProperties) = .{},
+};
+
+const FetcherState = enum {
+    get_tile,
+    get_tile_data_low,
+    get_tile_data_high,
+    sleep,
+    push
+};
+
+const Fetcher = struct {
+    fetcher_x: u8 = 0,
+    fetcher_y: u8 = 0,
+    window_line_counter: u8 = 0,
+    tile_number: u8 = 0,
+    tile_data_low: u8 = undefined,
+    tile_data_high: u8 = undefined,
+    rendering_window: bool = false,
+    cycles: u8 = 0,
+    state: FetcherState = .get_tile,
+    sprite_fifo: FIFO = .{},
+    other_fifo: FIFO = .{},
+};
+
+fn getTile(fetcher: *Fetcher, ppu: Ppu, mem: *Memory) void {
+    const tilemap_addr = blk: {
+        if (mem.io.LCDC.bg_tile_map_area and !ppu.wy_condition) {
+            break :blk 0x9C00;
+        }
+        if (mem.io.LCDC.window_tile_map_area and ppu.wy_condition) {
+            break :blk 0x9C00;
+        }
+        break :blk 0x9800;
+    };
+    if (fetcher.rendering_window) {
+        const y: u8 = @mod(fetcher.window_line_counter, 8);
+        const off= y *% 32 +% fetcher.fetcher_x;
+        fetcher.tile_number = mem.readByte(tilemap_addr + off);
+    } else {
+        const scx = mem.io.SCX;
+
+        const x = (@divFloor(scx, 8) + fetcher.fetcher_x) & 0x1F;
+        assert(x < 32);
+        const y = (mem.io.LY +% scx) & 255;
+        const off = y *% 32 +% x;
+        fetcher.tile_number = mem.readByte(tilemap_addr + off);
     }
 }

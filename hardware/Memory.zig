@@ -5,7 +5,6 @@ const Memory = @This();
 
 const KiB = 1024;
 
-raw: [std.math.maxInt(u16) + 1]u8,
 sb_data: u8,
 rom_mapped: bool,
 bank0: [16 * KiB]u8,
@@ -105,7 +104,7 @@ fn rangeFromAddr(addr: usize) MemRange {
 
 pub fn readByte(self: Memory, addr: usize) u8 {
 
-    if (true) {
+    if (false) {
         return self.raw[addr];
     }
 
@@ -137,7 +136,7 @@ pub fn readByte(self: Memory, addr: usize) u8 {
 }
 pub fn readBytes(self: Memory, addr: usize) u16 {
 
-    if (true) {
+    if (false) {
         return std.mem.readInt(u16, self.raw[addr..][0..2], .little);
     }
 
@@ -165,7 +164,7 @@ pub fn readBytes(self: Memory, addr: usize) u16 {
 }
 pub fn writeByte(self: *Memory, addr: usize, val: u8) void {
 
-    if (true) {
+    if (false) {
         self.raw[addr] = val;
         return;
     }
@@ -195,7 +194,7 @@ pub fn writeByte(self: *Memory, addr: usize, val: u8) void {
 }
 pub fn writeBytes(self: *Memory, addr: usize, val: u16) void {
 
-    if (true) {
+    if (false) {
         std.mem.writeInt(u16, self.raw[addr..][0..2], val, .little);
         return;
     }
