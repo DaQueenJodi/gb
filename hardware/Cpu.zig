@@ -8,6 +8,13 @@ const Memory = @import("Memory.zig");
 const Cpu = @This();
 
 
+const CpuMode = enum {
+    halt,
+    stop,
+    normal
+};
+
+mode: CpuMode = .normal,
 ime_scheduled: bool,
 mem: *Memory,
 regs: Registers,
@@ -26,20 +33,20 @@ pub fn deinit(cpu: Cpu, allocator: Allocator) void {
 pub fn nextByte(cpu: *Cpu) u8 {
     const b = cpu.mem.readByte(cpu.regs.pc);
     std.log.debug("b: {X:0>2}", .{b});
-    cpu.regs.pc += 1;
+    cpu.regs.pc +%= 1;
     return b;
 }
 
 pub fn nextSignedByte(cpu: *Cpu) i8 {
     const b: i8 = @bitCast(cpu.mem.readByte(cpu.regs.pc));
     std.log.debug("b: {X:0>2}", .{b});
-    cpu.regs.pc += 1;
+    cpu.regs.pc +%= 1;
     return b;
 }
 pub fn nextBytes(cpu: *Cpu) u16 {
     const bs = cpu.mem.readBytes(cpu.regs.pc);
     std.log.debug("bs: {X:0>4}", .{bs});
-    cpu.regs.pc += 2;
+    cpu.regs.pc +%= 2;
     return bs;
 }
 
@@ -124,12 +131,12 @@ pub fn and_(cpu: *Cpu, n: u8) void {
     cpu.regs.set("A", cpu.regs.get("A") & n);
     cpu.regs.set_z(cpu.regs.get("A") == 0);
     cpu.regs.set_n(false);
-    cpu.regs.set_h(false);
+    cpu.regs.set_h(true);
     cpu.regs.set_c(false);
 }
 pub fn add(cpu: *Cpu, n: u8) void {
     const a = cpu.regs.get("A");
-    cpu.regs.set("A", n +% a);
+    cpu.regs.set("A", a +% n);
     cpu.regs.set_z(cpu.regs.get("A") == 0);
     cpu.regs.set_n(false);
     cpu.regs.set_h(addHalfCarry8(a, n));
@@ -139,7 +146,6 @@ pub fn add16(cpu: *Cpu, n: u16) void {
     const hl = cpu.regs.get("HL");
     const res = n +% hl;
     cpu.regs.set("HL", res);
-    cpu.regs.set_z(res == 0);
     cpu.regs.set_n(false);
     cpu.regs.set_h(addHalfCarry16(hl, n));
     cpu.regs.set_c(hl > res);
@@ -147,20 +153,26 @@ pub fn add16(cpu: *Cpu, n: u16) void {
 pub fn adc(cpu: *Cpu, n: u8) void {
     const c = @intFromBool(cpu.regs.get_c());
     const a = cpu.regs.get("A");
-    cpu.regs.set("A", a +% n +% c);
-    cpu.regs.set_z(cpu.regs.get("A") == 0);
+    const summand = n +% c;
+    const res = a +% summand;
+    cpu.regs.set("A", res);
+    cpu.regs.set_z(res == 0);
     cpu.regs.set_n(false);
-    cpu.regs.set_h(addHalfCarry8(a, a +% c));
-    cpu.regs.set_c(a > cpu.regs.get("A"));
+    const hc = ((a & 0x0F) + (n & 0x0F) + (c)) > 0xF;
+    cpu.regs.set_h(hc);
+    cpu.regs.set_c(a > res or n > summand);
 }
 pub fn sbc(cpu: *Cpu, n: u8) void {
     const c = @intFromBool(cpu.regs.get_c());
     const a = cpu.regs.get("A");
-    cpu.regs.set("A", a -% n -% c);
-    cpu.regs.set_z(cpu.regs.get("A") == 0);
-    cpu.regs.set_n(false);
-    cpu.regs.set_h(addHalfCarry8(a, n -% c));
-    cpu.regs.set_c(a < cpu.regs.get("A"));
+    const subtrahend = n +% c;
+    const res = a -% subtrahend;
+    cpu.regs.set("A", res);
+    cpu.regs.set_z(res == 0);
+    cpu.regs.set_n(true);
+    const hc = (a & 0x0F) < ((n & 0x0F) + (c));
+    cpu.regs.set_h(hc);
+    cpu.regs.set_c(a < res or n > subtrahend);
 }
 
 pub fn addHalfCarry8(a: u8, b: u8) bool {
@@ -169,14 +181,14 @@ pub fn addHalfCarry8(a: u8, b: u8) bool {
     const mask = 0x01 << 4;
     return (la + lb) & mask == mask;
 }
-pub fn subHalfCarry8(a: u8, b: u8) bool {
-    return (a & 0x0F) < (b & 0x0F);
-}
 pub fn addHalfCarry16(a: u16, b: u16) bool {
     const la = a & 0x0FFF;
     const lb = b & 0x0FFF;
-    const mask = 0x01 << 4;
+    const mask = 0x01 << 12;
     return (la + lb) & mask == mask;
+}
+pub fn subHalfCarry8(a: u8, b: u8) bool {
+    return (a & 0x0F) < (b & 0x0F);
 }
 pub fn subHalfCarry16(a: u16, b: u16) bool {
     return (a & 0x0FFF) < (b & 0x0FFF);
@@ -194,7 +206,7 @@ pub fn inc(cpu: *Cpu, comptime s: []const u8) void {
     const r = cpu.regs.get(s);
     cpu.regs.set(s, r +% 1);
     cpu.regs.set_z(cpu.regs.get(s) == 0);
-    cpu.regs.set_n(true);
+    cpu.regs.set_n(false);
     cpu.regs.set_h(addHalfCarry8(r, 1));
 }
 
@@ -206,21 +218,60 @@ pub fn rr(cpu: *Cpu, comptime s: []const u8) void {
 
     const shifted = val >> 1;
     const res = shifted | (c << 7);
-    cpu.regs.set(s, shifted | (c << 7));
-
+    cpu.regs.set(s, res);
     cpu.regs.set_z(res == 0);
     cpu.regs.set_n(false);
     cpu.regs.set_h(false);
     cpu.regs.set_c(old_b0 == 1);
 }
 
+pub fn rl(cpu: *Cpu, comptime s: []const u8) void {
+   const val = cpu.regs.get(s);
+
+    const c: u8 = @intFromBool(cpu.regs.get_c());
+    const old_b7 = (val & (0x01 << 7)) >> 7;
+
+    const shifted = val << 1;
+    const res = shifted | c;
+    cpu.regs.set(s, res);
+
+    cpu.regs.set_z(res == 0);
+    cpu.regs.set_n(false);
+    cpu.regs.set_h(false);
+    cpu.regs.set_c(old_b7 == 1);
+}
+pub fn rlc(cpu: *Cpu, comptime s: []const u8) void {
+    const orig = cpu.regs.get(s);
+    const masked: u8 = orig & (0x01 << 7);
+    const b7: u1 = @intCast(masked >> 7);
+    const shifted = orig << 1;
+    const res = (shifted | b7);
+    cpu.regs.set(s, res);
+    cpu.regs.set_z(res == 0);
+    cpu.regs.set_n(false);
+    cpu.regs.set_h(false);
+    cpu.regs.set_c(b7 == 1);
+}
+
+pub fn rrc(cpu: *Cpu, comptime s: []const u8) void {
+    const orig = cpu.regs.get(s);
+    const b0: u8 = @intCast(orig & 0x01);
+    const shifted = orig >> 1;
+    const res = (shifted | (b0 << 7));
+    cpu.regs.set(s, res);
+    cpu.regs.set_z(res == 0);
+    cpu.regs.set_n(false);
+    cpu.regs.set_h(false);
+    cpu.regs.set_c(b0 == 1);
+}
 pub fn sub(cpu: *Cpu, val: u8) void {
     const a = cpu.regs.get("A");
-    cpu.regs.set("A", a -% val);
-    cpu.regs.set_z(cpu.regs.get("A") == 0);
+    const res = a -% val;
+    cpu.regs.set("A", res);
+    cpu.regs.set_z(res == 0);
     cpu.regs.set_n(true);
     cpu.regs.set_h(subHalfCarry8(a, val));
-    cpu.regs.set_c(a > cpu.regs.get("A"));
+    cpu.regs.set_c(a < res);
 }
 
 pub fn cp(cpu: *Cpu, val: u8) void {

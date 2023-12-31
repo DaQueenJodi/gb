@@ -5,6 +5,7 @@ const Memory = @This();
 
 const KiB = 1024;
 
+raw: [std.math.maxInt(u16) + 1]u8,
 sb_data: u8,
 rom_mapped: bool,
 bank0: [16 * KiB]u8,
@@ -103,6 +104,12 @@ fn rangeFromAddr(addr: usize) MemRange {
 }
 
 pub fn readByte(self: Memory, addr: usize) u8 {
+
+    if (true) {
+        return self.raw[addr];
+    }
+
+
     const region = rangeFromAddr(addr);
     //std.log.debug("reading from: {}", .{region});
     return switch (region) {
@@ -129,6 +136,11 @@ pub fn readByte(self: Memory, addr: usize) u8 {
     };
 }
 pub fn readBytes(self: Memory, addr: usize) u16 {
+
+    if (true) {
+        return std.mem.readInt(u16, self.raw[addr..][0..2], .little);
+    }
+
     const region = rangeFromAddr(addr);
     return switch (region) {
         .prohiboted => {
@@ -137,7 +149,7 @@ pub fn readBytes(self: Memory, addr: usize) u16 {
         },
         .external_ram => std.mem.readInt(u16, &[2]u8{ self.external_ram[addr - EXTERNAL_RAM_OFF], self.external_ram[addr - EXTERNAL_RAM_OFF + 1] }, .little),
         .bank0 => std.mem.readInt(u16, self.bank0[addr - BANK0_OFF ..][0..2], .little),
-        .bank1 => std.mem.readInt(u16, self.bank0[addr - BANK1_OFF ..][0..2], .little),
+        .bank1 => std.mem.readInt(u16, self.bank1[addr - BANK1_OFF ..][0..2], .little),
         .vram => std.mem.readInt(u16, self.vram[addr - VRAM_OFF ..][0..2], .little),
         .oam => std.mem.readInt(u16, self.oam[addr - OAM_OFF ..][0..2], .little),
         .io => {
@@ -152,13 +164,25 @@ pub fn readBytes(self: Memory, addr: usize) u16 {
     };
 }
 pub fn writeByte(self: *Memory, addr: usize, val: u8) void {
+
+    if (true) {
+        self.raw[addr] = val;
+        return;
+    }
+
     const region = rangeFromAddr(addr);
-    //std.log.debug("writing {X:0<2} to: {}", .{val, region});
     switch (region) {
-        .prohiboted => std.log.warn("writing to prohiboted memory region: {X:0<4}", .{addr}),
+        .prohiboted => {
+            std.log.warn("writing to prohiboted memory region: {X:0<4}", .{addr});
+        },
         .external_ram => self.external_ram[addr - EXTERNAL_RAM_OFF] = val,
-        .bank0 => std.log.warn("tried to write to ROM lol", .{}),
-        .bank1 => std.log.warn("tried to write to ROM lol", .{}),
+        .bank0 => {
+            std.log.warn("tried to write to ROM lol", .{});
+        },
+        .bank1 => {
+            self.bank1[addr - BANK1_OFF] = val;
+            std.log.warn("tried to write to ROM lol", .{});
+        },
         .vram => self.vram[addr - VRAM_OFF] = val,
         .wram0 => self.wram0[addr - WRAM0_OFF] = val,
         .wram1 => self.wram1[addr - WRAM1_OFF] = val,
@@ -170,12 +194,24 @@ pub fn writeByte(self: *Memory, addr: usize, val: u8) void {
     }
 }
 pub fn writeBytes(self: *Memory, addr: usize, val: u16) void {
+
+    if (true) {
+        std.mem.writeInt(u16, self.raw[addr..][0..2], val, .little);
+        return;
+    }
+
     const region = rangeFromAddr(addr);
     //std.log.debug("writing {X:0<4} to: {}", .{val, region});
     switch (region) {
-        .prohiboted => std.log.warn("writing to prohiboted memory region: {X:0<4}", .{addr}),
-        .bank0 => std.log.warn("tried to write to ROM lol", .{}),
-        .bank1 => std.log.warn("tried to write to ROM lol", .{}),
+        .prohiboted => {
+            std.log.warn("writing to prohiboted memory region: {X:0<4}", .{addr});
+        },
+        .bank0 => {
+            std.log.warn("tried to write to ROM lol", .{});
+        },
+        .bank1 => {
+            std.log.warn("tried to write to ROM lol", .{});
+        },
         .vram => std.mem.writeInt(u16, self.vram[addr - VRAM_OFF ..][0..2], val, .little),
         .oam => std.mem.writeInt(u16, self.oam[addr - OAM_OFF ..][0..2], val, .little),
         .io => std.log.warn("IO not implemented yet", .{}),

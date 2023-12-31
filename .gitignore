@@ -1,5 +1,6 @@
-*.gb
+roms/
+hardware/bootroms
+failed_test
 tests/jsmoo
-dmg_boot.bin
 zig-out
 zig-cache

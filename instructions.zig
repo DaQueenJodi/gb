@@ -39,7 +39,7 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
             const hl = cpu.regs.get("HL");
             cpu.mem.writeByte(hl, cpu.regs.get("A"));
             cpu.regs.set("HL", hl-%1);
-            return 12;
+            return 8;
         },
         // DEC B
         0x05 => {
@@ -131,8 +131,8 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
         // LD (FF00+C), A
         0xE2 => {
             const c = cpu.regs.get("C");
-            const addr: u16 = @as(u16, 0xFF00) + c;
-            cpu.regs.set("A", cpu.mem.readByte(addr));
+            const addr: u16 = @as(u16, 0xFF00) +% c;
+            cpu.mem.writeByte(addr, cpu.regs.get("A"));
             return 8;
         },
         // INC C
@@ -167,13 +167,17 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
             }
 
             const new = if (!n) src +% correction else src -% correction;
+
             cpu.regs.set("A", new);
+            cpu.regs.set_h(false);
             cpu.regs.set_z(new == 0);
 
             return 4;
         },
         // LD A, A
-        0x7F => return 4,
+        0x7F => {
+            return 4;
+        },
         // EI
         0xFB => {
             cpu.ime_scheduled = true;
@@ -213,7 +217,7 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
             cpu.regs.set("A", cpu.mem.readByte(cpu.regs.get("DE")));
             return 8;
         },
-        // SUB A, (HL)
+        // SUB (HL)
         0x96 => {
             cpu.sub(cpu.mem.readByte(cpu.regs.get("HL")));
             return 8;
@@ -248,10 +252,14 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
         0x28 => {
             const n: i8 = @intCast(cpu.nextSignedByte());
             if (cpu.regs.get_z()) {
-                const pc_i: i32 = @intCast(cpu.regs.pc);
-                cpu.jp(@intCast(pc_i + n));
+                const neg = n < 0;
+                const n_a = @abs(n);
+                const pc = cpu.regs.get("PC");
+                const addr = if (neg) pc -% n_a else pc +% n_a;
+                cpu.jp(addr);
                 return 12;
-            } else return 8;
+            }
+            return 8;
         },
         // LD L, d8
         0x2E => {
@@ -261,8 +269,11 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
         // JR r8
         0x18 => {
             const n: i8 = @intCast(cpu.nextSignedByte());
-            const pc_i: i32 = @intCast(cpu.regs.pc);
-            cpu.jp(@intCast(pc_i + n));
+            const neg = n < 0;
+            const n_a = @abs(n);
+            const pc = cpu.regs.get("PC");
+            const addr = if (neg) pc -% n_a else pc +% n_a;
+            cpu.jp(addr);
             return 12;
         },
         // LD H, A
@@ -300,14 +311,14 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
             cpu.regs.set("A", cpu.regs.get("H"));
             return 4;
         },
-        // SUB A, B
+        // SUB B
         0x90 => {
             cpu.sub(cpu.regs.get("B"));
             return 4;
         },
         // DEC D
         0x15 => {
-            cpu.dec("B");
+            cpu.dec("D");
             return 4;
         },
         // CP A, (HL)
@@ -610,7 +621,6 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
             cpu.mem.writeByte(cpu.regs.get("HL"), res);
             cpu.regs.set_n(true);
             cpu.regs.set_z(res == 0);
-            cpu.regs.set_c(n > res);
             cpu.regs.set_h(Cpu.subHalfCarry8(n, 1));
             return 12;
         },
@@ -747,32 +757,33 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
         },
         // ADD SP, r8
         0xE8 => {
-            const n = cpu.nextSignedByte();
-            const neg = n < 0;
-            const n_u: u8 = @abs(n);
+            const n: u8 = cpu.nextByte();
             const sp = cpu.regs.get("SP");
-            const res: u16 = if (neg) sp -% n_u else sp +% n_u;
-            cpu.regs.set("SP", res);
+            const res = sp +% n;
+
             cpu.regs.set_z(false);
             cpu.regs.set_n(false);
+            const hc = (sp & 0x000F) + (n & 0x000f) == 0x10;
+            cpu.regs.set_h(hc);
             cpu.regs.set_c(res < sp);
-            cpu.regs.set_h(Cpu.addHalfCarry16(sp, @intCast(n_u)));
             return 16;
         },
         // LD HL, SP+r8
         0xF8 => {
-            const n = cpu.nextSignedByte();
-            const neg = n < 0;
-            const n_u: u8 = @abs(n);
+            const n: i8 = cpu.nextSignedByte();
+            const n16: i16 = @intCast(n);
             const sp = cpu.regs.get("SP");
-            const res: u16 = if (neg) sp -% n_u else sp +% n_u;
+            const sp_i: i32 = @intCast(sp);
+            const res: u16 = @intCast(sp_i + n16);
 
+            const c = (sp_i & 0x000000FF) + n > 0xFF;
+            const sp_low_i: i8 = @intCast(sp & 0x000F);
+            const hc = sp_low_i + (n & 0x0F) > 0x0F;
             cpu.regs.set("HL", res);
-
             cpu.regs.set_z(false);
             cpu.regs.set_n(false);
-            cpu.regs.set_c(res < sp);
-            cpu.regs.set_h(Cpu.addHalfCarry16(sp, @intCast(n_u)));
+            cpu.regs.set_h(hc);
+            cpu.regs.set_c(c);
             return 12;
         },
         // SCF
@@ -897,6 +908,482 @@ pub fn exec(cpu: *Cpu, opcode: u8) usize {
         0xFF => {
             cpu.call(0x0038);
             return 16;
+        },
+        // LD (BC), A
+        0x02 => {
+            cpu.mem.writeByte(cpu.regs.get("BC"), cpu.regs.get("A"));
+            return 8;
+        },
+        // RLCA 
+        0x07 => {
+            cpu.rlc("A");
+            cpu.regs.set_z(false);
+            return 4;
+        },
+        // ADD HL, BC
+        0x09 => {
+            cpu.add16(cpu.regs.get("BC"));
+            return 8;
+        },
+        // LD A, (BC)
+        0x0A => {
+            cpu.regs.set("A", cpu.mem.readByte(cpu.regs.get("BC")));
+            return 8;
+        },
+        // DEC BC
+        0x0B => {
+            cpu.regs.set("BC", cpu.regs.get("BC") -% 1);
+            return 8;
+        },
+        // RRCA
+        0x0F => {
+            cpu.rrc("A");
+            cpu.regs.set_z(false);
+            return 4;
+        },
+        // STOP
+        0x10 => {
+            cpu.mode = .stop;
+            return 4;
+        },
+        // RLA
+        0x17 => {
+            cpu.rl("A");
+            cpu.regs.set_z(false);
+            return 4;
+        },
+        // DEC HL
+        0x2B => {
+            cpu.regs.set("HL", cpu.regs.get("HL") -% 1);
+            return 8;
+        },
+        // INC (HL)
+        0x34 => {
+            const n = cpu.mem.readByte(cpu.regs.get("HL"));
+            const res = n +% 1;
+            cpu.mem.writeByte(cpu.regs.get("HL"), res);
+            cpu.regs.set_n(false);
+            cpu.regs.set_z(res == 0);
+            cpu.regs.set_h(Cpu.addHalfCarry8(n, 1));
+            return 12;
+        },
+        // LD A, (HL-)
+        0x3A => {
+            cpu.regs.set("A", cpu.mem.readByte(cpu.regs.get("HL")));
+            cpu.regs.set("HL", cpu.regs.get("HL") -% 1);
+            return 8;
+        },
+        // CCF
+        0x3F => {
+            cpu.regs.set_n(false);
+            cpu.regs.set_h(false);
+            cpu.regs.set_c(!cpu.regs.get_c());
+            return 4;
+        },
+        // LD B, B
+        0x40 => {
+            return 4;
+        },
+        // LD B, C
+        0x41 => {
+            cpu.regs.set("B", cpu.regs.get("C"));
+            return 4;
+        },
+        // LD B, D
+        0x42 => {
+            cpu.regs.set("B", cpu.regs.get("D"));
+            return 4;
+        },
+        // LD B, E
+        0x43 => {
+            cpu.regs.set("B", cpu.regs.get("E"));
+            return 4;
+        },
+        // LD B, H
+        0x44 => {
+            cpu.regs.set("B", cpu.regs.get("H"));
+            return 4;
+        },
+        // LD B, L
+        0x45 => {
+            cpu.regs.set("B", cpu.regs.get("L"));
+            return 4;
+        },
+        // LD C, B
+        0x48 => {
+            cpu.regs.set("C", cpu.regs.get("B"));
+            return 4;
+        },
+        // LD C, C
+        0x49 => {
+            return 4;
+        },
+        // LD C, D
+        0x4A => {
+            cpu.regs.set("C", cpu.regs.get("D"));
+            return 4;
+        },
+        // LD C, E
+        0x4B => {
+            cpu.regs.set("C", cpu.regs.get("E"));
+            return 4;
+        },
+        // LD C, H
+        0x4C => {
+            cpu.regs.set("C", cpu.regs.get("H"));
+            return 4;
+        },
+        // LD D, B
+        0x50 => {
+            cpu.regs.set("D", cpu.regs.get("B"));
+            return 4;
+        },
+        // LD D, C
+        0x51 => {
+            cpu.regs.set("D", cpu.regs.get("C"));
+            return 4;
+        },
+        // LD D, D
+        0x52 => {
+            return 4;
+        },
+        // LD D, E
+        0x53 => {
+            cpu.regs.set("D", cpu.regs.get("E"));
+            return 4;
+        },
+        // LD D, H
+        0x54 => {
+            cpu.regs.set("D", cpu.regs.get("H"));
+            return 4;
+        },
+        // LD D, L
+        0x55 => {
+            cpu.regs.set("D", cpu.regs.get("L"));
+            return 4;
+        },
+        // LD E, B
+        0x58 => {
+            cpu.regs.set("E", cpu.regs.get("B"));
+            return 4;
+        },
+        // LD E, C
+        0x59 => {
+            cpu.regs.set("E", cpu.regs.get("C"));
+            return 4;
+        },
+        // LD E, E
+        0x5B => {
+            return 4;
+        },
+        // LD E, H
+        0x5C => {
+            cpu.regs.set("E", cpu.regs.get("H"));
+            return 4;
+        },
+        // LD H, B
+        0x60 => {
+            cpu.regs.set("H", cpu.regs.get("B"));
+            return 4;
+        },
+        // LD H, C
+        0x61 => {
+            cpu.regs.set("H", cpu.regs.get("C"));
+            return 4;
+        },
+        // LD H, E
+        0x63 => {
+            cpu.regs.set("H", cpu.regs.get("E"));
+            return 4;
+        },
+        // LD H, H
+        0x64 => {
+            return 4;
+        },
+        // LD H, L
+        0x65 => {
+            cpu.regs.set("H", cpu.regs.get("L"));
+            return 4;
+        },
+        // LD L, C
+        0x69 => {
+            cpu.regs.set("L", cpu.regs.get("C"));
+            return 4;
+        },
+        // LD L, D
+        0x6A => {
+            cpu.regs.set("L", cpu.regs.get("D"));
+            return 4;
+        },
+        // LD L, H
+        0x6C => {
+            cpu.regs.set("L", cpu.regs.get("H"));
+            return 4;
+        },
+        // LD L, L
+        0x6D => {
+            return 4;
+        },
+        // LD (HL), H
+        0x74 => {
+            cpu.mem.writeByte(cpu.regs.get("HL"), cpu.regs.get("H"));
+            return 8;
+        },
+        // LD (HL), L
+        0x75 => {
+            cpu.mem.writeByte(cpu.regs.get("HL"), cpu.regs.get("L"));
+            return 8;
+        },
+        // HALT
+        0x76 => {
+            cpu.mode = .halt;
+            return 4;
+        },
+        // ADD B
+        0x80 => {
+            cpu.add(cpu.regs.get("B"));
+            return 4;
+        },
+        // ADD C
+        0x81 => {
+            cpu.add(cpu.regs.get("C"));
+            return 4;
+        },
+        // ADD D
+        0x82 => {
+            cpu.add(cpu.regs.get("D"));
+            return 4;
+        },
+        // ADD E
+        0x83 => {
+            cpu.add(cpu.regs.get("E"));
+            return 4;
+        },
+        // ADD H
+        0x84 => {
+            cpu.add(cpu.regs.get("H"));
+            return 4;
+        },
+        // ADD L
+        0x85 => {
+            cpu.add(cpu.regs.get("L"));
+            return 4;
+        },
+        // ADD (HL)
+        0x86 => {
+            cpu.add(cpu.mem.readByte(cpu.regs.get("HL")));
+            return 8;
+        },
+        // ADD A
+        0x87 => {
+            cpu.add(cpu.regs.get("A"));
+            return 4;
+        },
+        // ADC B
+        0x88 => {
+            cpu.adc(cpu.regs.get("B"));
+            return 4;
+        },
+        // ADC C
+        0x89 => {
+            cpu.adc(cpu.regs.get("C"));
+            return 4;
+        },
+        // ADC D
+        0x8A => {
+            cpu.adc(cpu.regs.get("D"));
+            return 4;
+        },
+        // ADC E
+        0x8B => {
+            cpu.adc(cpu.regs.get("E"));
+            return 4;
+        },
+        // ADC H
+        0x8C => {
+            cpu.adc(cpu.regs.get("H"));
+            return 4;
+        },
+        // ADC L
+        0x8D => {
+            cpu.adc(cpu.regs.get("L"));
+            return 4;
+        },
+        // ADC HL
+        0x8E => {
+            cpu.adc(cpu.mem.readByte(cpu.regs.get("HL")));
+            return 8;
+        },
+        // ADC A
+        0x8F => {
+            cpu.adc(cpu.regs.get("A"));
+            return 4;
+        },
+        // SUB C
+        0x91 => {
+            cpu.sub(cpu.regs.get("C"));
+            return 4;
+        },
+        // SUB D
+        0x92 => {
+            cpu.sub(cpu.regs.get("D"));
+            return 4;
+        },
+        // SUB H
+        0x94 => {
+            cpu.sub(cpu.regs.get("H"));
+            return 4;
+        },
+        // SUB A
+        0x97 => {
+            cpu.sub(cpu.regs.get("A"));
+            return 4;
+        },
+        // SBC B
+        0x98 => {
+            cpu.sbc(cpu.regs.get("B"));
+            return 4;
+        },
+        // SBC C
+        0x99 => {
+            cpu.sbc(cpu.regs.get("C"));
+            return 4;
+        },
+        // SBC D
+        0x9A => {
+            cpu.sbc(cpu.regs.get("D"));
+            return 4;
+        },
+        // SBC E
+        0x9B => {
+            cpu.sbc(cpu.regs.get("E"));
+            return 4;
+        },
+        // SBC H
+        0x9C => {
+            cpu.sbc(cpu.regs.get("H"));
+            return 4;
+        },
+        // SBC L
+        0x9D => {
+            cpu.sbc(cpu.regs.get("L"));
+            return 4;
+        },
+        // SBC (HL)
+        0x9E => {
+            cpu.sbc(cpu.mem.readByte(cpu.regs.get("HL")));
+            return 8;
+        },
+        // SBC A
+        0x9F => {
+            cpu.sbc(cpu.regs.get("A"));
+            return 4;
+        },
+        // AND B
+        0xA0 => {
+            cpu.and_(cpu.regs.get("B"));
+            return 4;
+        },
+        // AND C
+        0xA1 => {
+            cpu.and_(cpu.regs.get("C"));
+            return 4;
+        },
+        // AND D
+        0xA2 => {
+            cpu.and_(cpu.regs.get("D"));
+            return 4;
+        },
+        // AND E
+        0xA3 => {
+            cpu.and_(cpu.regs.get("E"));
+            return 4;
+        },
+        // AND H
+        0xA4 => {
+            cpu.and_(cpu.regs.get("H"));
+            return 4;
+        },
+        // AND L
+        0xA5 => {
+            cpu.and_(cpu.regs.get("L"));
+            return 4;
+        },
+        // AND A
+        0xA7 => {
+            cpu.and_(cpu.regs.get("A"));
+            return 4;
+        },
+        // XOR B
+        0xA8 => {
+            cpu.xor(cpu.regs.get("B"));
+            return 4;
+        },
+        // XOR D
+        0xAA => {
+            cpu.xor(cpu.regs.get("D"));
+            return 4;
+        },
+        // XOR E
+        0xAB => {
+            cpu.xor(cpu.regs.get("E"));
+            return 4;
+        },
+        // OR D
+        0xB2 => {
+            cpu.or_(cpu.regs.get("D"));
+            return 4;
+        },
+        // OR E
+        0xB3 => {
+            cpu.or_(cpu.regs.get("E"));
+            return 4;
+        },
+        // OR H
+        0xB4 => {
+            cpu.or_(cpu.regs.get("H"));
+            return 4;
+        },
+        // OR L
+        0xB5 => {
+            cpu.or_(cpu.regs.get("L"));
+            return 4;
+        },
+        // CP B
+        0xB8 => {
+            cpu.cp(cpu.regs.get("B"));
+            return 4;
+        },
+        // CP C
+        0xB9 => {
+            cpu.cp(cpu.regs.get("C"));
+            return 4;
+        },
+        // CP D
+        0xBA => {
+            cpu.cp(cpu.regs.get("D"));
+            return 4;
+        },
+        // CP H
+        0xBC => {
+            cpu.cp(cpu.regs.get("H"));
+            return 4;
+        },
+        // CP L
+        0xBD => {
+            cpu.cp(cpu.regs.get("L"));
+            return 4;
+        },
+        // CP A
+        0xBF => {
+            cpu.cp(cpu.regs.get("A"));
+            return 4;
+        },
+        // LD A, (FF00+C)
+        0xF2 => {
+            const addr: u16 = @as(u16, 0xFF00) + cpu.regs.get("C");
+            cpu.regs.set("A", cpu.mem.readByte(addr));
+            return 8;
         },
         else => std.debug.panic("invalid opcode: {X:0>2}", .{opcode}),
     }

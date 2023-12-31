@@ -13,8 +13,9 @@ pub fn gameboy(b: *std.build, hardware: *Module, instructions: *Module) *std.bui
 
 pub fn build(b: *std.Build) void {
     const llvm = b.option(bool, "llvm", "") orelse false;
-    const target = b.standardTargetOptions(.{});
+    const log_instrs = b.option(bool, "log_instrs", "") orelse false;
 
+    const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
     const exe = b.addExecutable(.{
@@ -35,7 +36,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .path = "generate_instruction_logs.zig" },
     });
 
-    const log_instrs = b.option(bool, "log_instrs", "") orelse true;
 
     const generater_step = b.addRunArtifact(generater);
     const generated_instructions_file = generater_step.addOutputFileArg("generated_instructions");

@@ -9,7 +9,7 @@ const SCREEN_WIDTH = 144;
 const SCREEN_HEIGHT = 160;
 
 pub const std_options = struct {
-    pub const log_level: std.log.Level = .info;
+    pub const log_level: std.log.Level = .err;
 };
 
 const c = @cImport({
@@ -25,7 +25,6 @@ pub fn main() !void {
 }
 
 pub fn main1() !void {
-
     c.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "gb");
     defer c.CloseWindow();
 
@@ -35,8 +34,8 @@ pub fn main1() !void {
 
     var cpu = try Cpu.create(allocator);
     defer cpu.deinit(allocator);
-    @memcpy(&cpu.mem.bank0, CART_IMAGE[0..16*KiB]);
-    @memcpy(&cpu.mem.bank1, CART_IMAGE[16*KiB..]);
+    @memcpy(&cpu.mem.bank0, CART_IMAGE[0 .. 16 * KiB]);
+    @memcpy(&cpu.mem.bank1, CART_IMAGE[16 * KiB ..]);
 
     var ppu = Ppu{};
 
@@ -58,17 +57,16 @@ pub fn main1() !void {
         if (ppu.dots_count == 70224) {
             ppu.resetFrame(cpu.mem);
 
-
             if (true) {
                 c.BeginDrawing();
                 for (0..SCREEN_HEIGHT) |y| {
                     for (0..SCREEN_WIDTH) |x| {
-                        const col = switch (Ppu.FB[y*SCREEN_WIDTH+x]) {
-                            .transparent => c.Color{.a = 0},
+                        const col = switch (Ppu.FB[y * SCREEN_WIDTH + x]) {
+                            .transparent => c.Color{ .a = 0 },
                             .white => c.WHITE,
                             .black => c.BLACK,
                             .dark_grey => c.DARKGRAY,
-                            .light_grey => c.LIGHTGRAY
+                            .light_grey => c.LIGHTGRAY,
                         };
                         c.DrawPixel(@intCast(x), @intCast(y), col);
                     }
@@ -90,13 +88,6 @@ pub fn main1() !void {
 
     std.process.cleanExit();
 }
-
-
-
-
-
-
-
 
 const Allocator = std.mem.Allocator;
 const Registers = GB.Registers;
@@ -126,7 +117,6 @@ const Test = struct {
     cycles: []std.json.Value,
 };
 
-
 const REG_TABLE = [_]struct { l: []const u8, u: []const u8 }{
     .{ .l = "a", .u = "A" },
     .{ .l = "b", .u = "B" },
@@ -147,13 +137,7 @@ fn configToCpu(allocator: Allocator, config: Config) !Cpu {
     // TODO: desmellify this
     for (config.ram) |r| {
         const addr = r[0];
-        if (addr < 0x4000) {
-            mem.bank0[addr] = @intCast(r[1]);
-        } else if (addr < 0x8000) {
-            mem.bank1[addr - 0x4000] = @intCast(r[1]);
-        } else {
-            mem.writeByte(addr, @intCast(r[1]));
-        }
+        mem.writeByte(addr, @intCast(r[1]));
     }
 
     var regs: Registers = undefined;
@@ -168,15 +152,26 @@ fn configToCpu(allocator: Allocator, config: Config) !Cpu {
         .regs = regs,
     };
 }
-fn cmpCpuConfig(cpu: Cpu, config: Config) void {
+
+fn cmpCpuConfig(cpu: Cpu, config: Config) bool {
     inline for (REG_TABLE) |r| {
-        //std.log.info("comparing: {s}", .{r.u});
-        assert(cpu.regs.get(r.u) == @field(config, r.l));
+        if (cpu.regs.get(r.u) != @field(config, r.l)) {
+            std.log.err("register {s} should be {X} but is {X}!", .{
+                r.u, @field(config, r.l), cpu.regs.get(r.u),
+            });
+            return false;
+        }
     }
     for (config.ram) |r| {
         const addr = r[0];
-        assert(cpu.mem.readByte(addr) == r[1]);
+        if (cpu.mem.readByte(addr) != r[1]) {
+            std.log.err("memory address {X:0>4} should be {X:0>2} but is {X:0>2}!", .{
+                addr, r[1], cpu.mem.readByte(addr),
+            });
+            return false;
+        }
     }
+    return true;
 }
 
 fn readFile(alloc: Allocator, path: []const u8) ![]const u8 {
@@ -188,18 +183,90 @@ fn readFile(alloc: Allocator, path: []const u8) ![]const u8 {
     _ = try f.readAll(buf);
     return buf;
 }
+const TESTS_IGNORE = [_]u8{
+    // TODO
+    0xE8,
+};
 
-pub fn testing() !void  {
+const TEST_FILES_COUNT = 500;
+const TEST_FILE_PATHS: [500][]const u8 = blk: {
+    var arr: [500][]const u8 = undefined;
+    var arr_i: usize = 0;
+    // opcodes that dont exist
+    const exceptions = [12]u8{
+        0xD3, 0xE3, 0xE4, 0xF4, 0xDB, 0xEB, 0xEC, 0xFC, 0xFD, 0xED, 0xDD, 0xCB
+    };
+    for (0..0xFF) |b| {
+        if (std.mem.indexOfScalar(u8, &exceptions, b) == null and
+            std.mem.indexOfScalar(u8, &TESTS_IGNORE, b) == null)
+        {
+            arr[arr_i] = std.fmt.comptimePrint("tests/jsmoo/{x:0>2}.json.zst", .{b});
+            arr_i += 1;
+        }
+    }
+    // CB prefixed
+    for (0..0xFF) |b| {
+        arr[arr_i] = std.fmt.comptimePrint("tests/jsmoo/CB {x:0>2}.json.zst", .{b});
+        arr_i += 1;
+    }
+
+    break :blk arr;
+};
+
+fn testFailed(test_nr: usize, check_nr: usize) !void {
+    std.log.err("TEST {} FAILED AT CHECK {}!", .{ test_nr, check_nr });
+    const f = try std.fs.cwd().createFile("failed_test", .{});
+    defer f.close();
+
+    const writer = f.writer();
+    try writer.writeInt(usize, test_nr, .little);
+
+    std.process.exit(1);
+}
+
+fn test_last_failed() !usize {
+    const f = std.fs.cwd().openFile("failed_test", .{}) catch {
+        return 0;
+    };
+    defer f.close();
+
+    const reader = f.reader();
+    const test_nr = try reader.readInt(usize, .little);
+    return test_nr;
+}
+
+fn testing() !void {
+    const test_nr = try test_last_failed();
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    const json = try readFile(alloc, "tests/jsmoo/00.json");
-    const tests = try std.json.parseFromSliceLeaky([]Test, alloc, json, .{ .ignore_unknown_fields = true });
-    for (tests, 0..) |te, i| {
-        var cpu = try configToCpu(alloc, te.initial);
-        assert(execNextInstruction(&cpu) == te.cycles.len * 4);
-        cmpCpuConfig(cpu, te.final);
-        std.log.info("passed test #{}", .{i});
+    for (TEST_FILE_PATHS, 1..) |path, t_i| {
+        if (t_i < test_nr) continue;
+        std.debug.print("{s}\n", .{path});
+        const file = try std.fs.cwd().openFile(path, .{});
+        defer file.close();
+        var decompressed_stream = std.compress.zstd.decompressStream(alloc, file.reader());
+        defer decompressed_stream.deinit();
+        const json = try decompressed_stream.reader().readAllAlloc(alloc, std.math.maxInt(usize));
+        const tests = try std.json.parseFromSliceLeaky([]Test, alloc, json, .{ .ignore_unknown_fields = true });
+        for (tests, 0..) |te, ch_i| {
+            var cpu = try configToCpu(alloc, te.initial);
+            const cycles = execNextInstruction(&cpu);
+            // special case for STOP and HALT
+            if (cycles != te.cycles.len * 4 and t_i != 0x10 and t_i != 0x76) {
+                std.log.err("took {} cycles when it should have taken {}!", .{
+                    cycles, te.cycles.len * 4,
+                });
+                try testFailed(t_i, ch_i);
+            }
+            if (!cmpCpuConfig(cpu, te.final)) {
+                try testFailed(t_i, ch_i);
+            }
+        }
+
+        _ = arena.reset(.retain_capacity);
+        std.debug.print("passed: {}!\n", .{t_i});
     }
 }
