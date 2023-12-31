@@ -103,12 +103,6 @@ fn rangeFromAddr(addr: usize) MemRange {
 }
 
 pub fn readByte(self: Memory, addr: usize) u8 {
-
-    if (false) {
-        return self.raw[addr];
-    }
-
-
     const region = rangeFromAddr(addr);
     //std.log.debug("reading from: {}", .{region});
     return switch (region) {
@@ -135,11 +129,6 @@ pub fn readByte(self: Memory, addr: usize) u8 {
     };
 }
 pub fn readBytes(self: Memory, addr: usize) u16 {
-
-    if (false) {
-        return std.mem.readInt(u16, self.raw[addr..][0..2], .little);
-    }
-
     const region = rangeFromAddr(addr);
     return switch (region) {
         .prohiboted => {
@@ -163,12 +152,6 @@ pub fn readBytes(self: Memory, addr: usize) u16 {
     };
 }
 pub fn writeByte(self: *Memory, addr: usize, val: u8) void {
-
-    if (false) {
-        self.raw[addr] = val;
-        return;
-    }
-
     const region = rangeFromAddr(addr);
     switch (region) {
         .prohiboted => {
@@ -193,12 +176,6 @@ pub fn writeByte(self: *Memory, addr: usize, val: u8) void {
     }
 }
 pub fn writeBytes(self: *Memory, addr: usize, val: u16) void {
-
-    if (false) {
-        std.mem.writeInt(u16, self.raw[addr..][0..2], val, .little);
-        return;
-    }
-
     const region = rangeFromAddr(addr);
     //std.log.debug("writing {X:0<4} to: {}", .{val, region});
     switch (region) {

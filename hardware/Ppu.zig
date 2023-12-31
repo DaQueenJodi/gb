@@ -1,5 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const Allocator = std.mem.Allocator;
+const Fifo = std.fifo.LinearFifo;
 
 const Memory = @import("Memory.zig");
 const Ppu = @This();
@@ -37,36 +39,44 @@ const Color = enum {
     black,
 };
 
-pub fn tick(ppu: *Ppu, mem: *Memory) void {
+pub fn tick(ppu: *Ppu, mem: *Memory) !void {
     if (!mem.io.LCDC.lcd_ppu_enable) return;
 
     const scanline_dots = @mod(ppu.dots_count, DOTS_PER_SCANLINE+1);
     switch (ppu.mode) {
         .oam_scan => {
-            if (mem.io.LY == mem.io.WX) {
+            if (mem.io.LY == mem.io.WY) {
                 ppu.wy_condition = true;
             }
             if (scanline_dots == OAM_END) {
                 ppu.mode = .drawing;
-                ppu.render_x = 0;
-                // set up for bg drawing
-                // see how much SCX and SCY cuts off of the first sprite
-                const line_of_tile = @mod(mem.io.SCY, 8);
-                const tile_addr_off = (mem.io.SCY +% line_of_tile) *% 32 +% (mem.io.SCX +% ppu.render_x);
-                ppu.curr_tile_x = @mod(mem.io.SCX, 8);
-                ppu.curr_tile_line = loadBgTileLine(mem, @intCast(tile_addr_off), line_of_tile);
             }
         },
         .drawing => {
-            ppu.fetcher.tick();
+            try ppu.fetcher.tick(ppu.*, mem);
+            if (ppu.fetcher.other_fifo.readItem()) |p| {
+                const color = mem.io.BGP.get(p.color);
+                const col: Color = switch (color) {
+                    0 => .white,
+                    1 => .light_grey,
+                    2 => .dark_grey,
+                    3 => .black
+                };
+                //std.debug.print("pixel rendered: {}\n", .{p});
+                FB[mem.io.LY*SCREEN_WIDTH+ppu.x] = col;
+                ppu.x +%= 1;
+            }
+            if (scanline_dots == DRAWING_END_BASE) {
+                ppu.mode = .hblank;
+            }
         },
         .hblank => {
             if (scanline_dots == DOTS_PER_SCANLINE) {
-                ppu.render_y += 1;
-                mem.io.LY += 1;
+                ppu.fetcher.fetcher_x = 0;
+                ppu.x = 0;
+                mem.io.LY +%= 1;
                 if (mem.io.LY == 145) {
                     ppu.mode = .vblank;
-                    ppu.is_window = false;
                     ppu.wy_condition = false;
                 }
             }
@@ -85,12 +95,8 @@ pub fn tick(ppu: *Ppu, mem: *Memory) void {
 
 pub fn resetFrame(ppu: *Ppu, mem: *Memory) void {
     mem.io.LY = 0;
-    ppu.render_x = 0;
-    ppu.render_y = 0;
     ppu.wy_condition = false;
-    ppu.is_window = false;
     ppu.dots_count = 0;
-    ppu.penalties = 0;
     ppu.mode = .oam_scan;
 }
 
@@ -148,13 +154,14 @@ fn drawPixel(ppu: Ppu, mem: *Memory) void {
 
 
 
-const PixelProperties = struct {
+const OtherPixelProperties = struct {
     color: u2,
-    palette: u3,
     priority_bit: u1,
 };
-const FIFO = struct {
-    pixels: std.ArrayListUnmanaged(PixelProperties) = .{},
+const SpritePixelProperties = struct {
+    color: u2,
+    pallete: u3,
+    priority_bit: u1,
 };
 
 const FetcherState = enum {
@@ -165,41 +172,126 @@ const FetcherState = enum {
     push
 };
 
+const SpriteFifo = Fifo(SpritePixelProperties, .{.Static = 16 });
+const OtherFifo = Fifo(OtherPixelProperties, .{.Static = 16 });
+
 const Fetcher = struct {
     fetcher_x: u8 = 0,
-    fetcher_y: u8 = 0,
     window_line_counter: u8 = 0,
     tile_number: u8 = 0,
     tile_data_low: u8 = undefined,
     tile_data_high: u8 = undefined,
-    rendering_window: bool = false,
-    cycles: u8 = 0,
+    rendering_window: bool = true,
+    should_waiting: bool = false,
     state: FetcherState = .get_tile,
-    sprite_fifo: FIFO = .{},
-    other_fifo: FIFO = .{},
+    sprite_fifo: SpriteFifo = SpriteFifo.init(),
+    other_fifo: OtherFifo = OtherFifo.init(),
+    pub fn reset(fetcher: *Fetcher) void {
+        fetcher.sprite_fifo.discard(fetcher.sprite_fifo.readableLength());
+        fetcher.other_fifo.discard(fetcher.other_fifo.readableLength());
+    }
+    pub fn tick(fetcher: *Fetcher, ppu: Ppu, mem: *Memory) !void {
+        switch (fetcher.state) {
+            .get_tile => {
+                fetcher.getTile(ppu, mem);
+                fetcher.state = .get_tile_data_low;
+            },
+            .get_tile_data_low => {
+                fetcher.getTileDataLow(mem);
+                fetcher.state = .get_tile_data_high;
+            },
+            .get_tile_data_high => {
+                fetcher.getTileDataLow(mem);
+                fetcher.state = .sleep;
+            },
+            .sleep => {
+                fetcher.state = .push;
+            },
+            .push => {
+                try fetcher.push();
+            },
+        }
+        fetcher.should_waiting = !fetcher.should_waiting and fetcher.state != .push;
+    }
+    fn getTile(fetcher: *Fetcher, ppu: Ppu, mem: *Memory) void {
+        const tilemap_addr: u16 = blk: {
+            if (mem.io.LCDC.bg_tile_map_area == 1 and !ppu.wy_condition) {
+                break :blk 0x9C00;
+            }
+            if (mem.io.LCDC.window_tile_map_area == 1 and ppu.wy_condition) {
+                break :blk 0x9C00;
+            }
+            break :blk 0x9800;
+        };
+        if (fetcher.rendering_window) {
+            const y: u8 = @mod(fetcher.window_line_counter, 8);
+            const off= y *% 32 +% fetcher.fetcher_x;
+            fetcher.tile_number = mem.readByte(tilemap_addr + off);
+        } else {
+            const scx = mem.io.SCX;
+
+            const x = (@divFloor(scx, 8) + fetcher.fetcher_x) & 0x1F;
+            assert(x < 32);
+            const y = (mem.io.LY +% scx) & 255;
+            const off = y *% 32 +% x;
+            fetcher.tile_number = mem.readByte(tilemap_addr + off);
+        }
+    }
+    fn getTileDataLow(fetcher: *Fetcher, mem: *Memory) void {
+        const signed, const tilemap: u16 = switch (mem.io.LCDC.bg_window_tile_data_area) {
+            0 => .{true, 0x9000},
+            1 => .{false, 0x8000}
+        };
+        const tile_addr: u16 = switch (signed) {
+            false => blk: {
+                break :blk tilemap + fetcher.tile_number *% 16;
+            },
+            true => blk: {
+                const ni: u8 = @bitCast(fetcher.tile_number);
+                break :blk tilemap + ni *% 16;
+            }
+        };
+        const offset: u16 = switch (fetcher.rendering_window) {
+            true => 2 * @mod(fetcher.window_line_counter, 8),
+            false => 2 * @mod(mem.io.LY +% mem.io.SCY, 8)
+        };
+
+        fetcher.tile_data_low = mem.readByte(tile_addr + offset);
+    }
+    fn getTileDataHigh(fetcher: *Fetcher, mem: *Memory) void {
+        const signed, const tilemap: u16 = switch (mem.io.LCDC.bg_window_tile_data_area) {
+            0 => .{true, 0x9000},
+            1 => .{false, 0x8000}
+        };
+        const tile_addr: u16 = switch (signed) {
+            false => blk: {
+                break :blk tilemap + fetcher.tile_number *% 16;
+            },
+            true => blk: {
+                const ni: u8 = @bitCast(fetcher.tile_number);
+                break :blk tilemap + ni *% 16;
+            }
+        };
+        const offset: u16 = switch (fetcher.rendering_window) {
+            true => 2 * @mod(fetcher.window_line_counter, 8),
+            false => 2 * @mod(mem.io.LY +% mem.io.SCY, 8)
+        };
+
+        fetcher.tile_data_low = mem.readByte(tile_addr + offset +% 1);
+    }
+    fn push(fetcher: *Fetcher) !void {
+        if (fetcher.other_fifo.count == 0) {
+            const low_bits = std.bit_set.IntegerBitSet(8){.mask = fetcher.tile_data_low};
+            const high_bits = std.bit_set.IntegerBitSet(8){.mask = fetcher.tile_data_high};
+            for (0..8) |n| {
+                const bn = 7 - n;
+                const l: u1 = @intFromBool(low_bits.isSet(bn));
+                const h: u2 = @intFromBool(high_bits.isSet(bn));
+                try fetcher.other_fifo.writeItem(.{.color = (h << 1) | l, .priority_bit = 0});
+            }
+        }
+        fetcher.fetcher_x +%= 1;
+    }
 };
 
-fn getTile(fetcher: *Fetcher, ppu: Ppu, mem: *Memory) void {
-    const tilemap_addr = blk: {
-        if (mem.io.LCDC.bg_tile_map_area and !ppu.wy_condition) {
-            break :blk 0x9C00;
-        }
-        if (mem.io.LCDC.window_tile_map_area and ppu.wy_condition) {
-            break :blk 0x9C00;
-        }
-        break :blk 0x9800;
-    };
-    if (fetcher.rendering_window) {
-        const y: u8 = @mod(fetcher.window_line_counter, 8);
-        const off= y *% 32 +% fetcher.fetcher_x;
-        fetcher.tile_number = mem.readByte(tilemap_addr + off);
-    } else {
-        const scx = mem.io.SCX;
 
-        const x = (@divFloor(scx, 8) + fetcher.fetcher_x) & 0x1F;
-        assert(x < 32);
-        const y = (mem.io.LY +% scx) & 255;
-        const off = y *% 32 +% x;
-        fetcher.tile_number = mem.readByte(tilemap_addr + off);
-    }
-}

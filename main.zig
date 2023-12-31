@@ -28,12 +28,11 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    var ppu = Ppu{};
     var cpu = try Cpu.create(allocator);
     defer cpu.deinit(allocator);
-    for (CART_IMAGE[0x100..], 0x100..) |b, i| {
-        cpu.mem.writeByte(i, b);
-    }
-    var ppu = Ppu{};
+    @memcpy(cpu.mem.bank0[0..], CART_IMAGE[0..0x4000]);
+    @memcpy(cpu.mem.bank1[0..], CART_IMAGE[0x4000..]);
 
     const cart = Cart.init(CART_IMAGE);
     if (true) {
@@ -48,13 +47,14 @@ pub fn main() !void {
     while (true) {
         const cycles = execNextInstruction(&cpu);
         for (0..cycles) |_| {
-            ppu.tick(cpu.mem);
+            try ppu.tick(cpu.mem);
         }
         if (ppu.dots_count == 70224) {
             ppu.resetFrame(cpu.mem);
 
             if (true) {
                 c.BeginDrawing();
+                c.ClearBackground(c.WHITE);
                 for (0..SCREEN_HEIGHT) |y| {
                     for (0..SCREEN_WIDTH) |x| {
                         const col = switch (Ppu.FB[y * SCREEN_WIDTH + x]) {
