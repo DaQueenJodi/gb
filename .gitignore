@@ -1,6 +1,5 @@
 roms/
 hardware/bootroms
 failed_test
-tests/jsmoo
 zig-out
 zig-cache
