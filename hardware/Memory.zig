@@ -144,9 +144,9 @@ pub fn readBytes(self: Memory, addr: usize) u16 {
             std.log.warn("IO is not implemented yet", .{});
             return 0;
         },
-        .hram => std.mem.readInt(u16, self.hram[addr - HRAM_OFF..][0..2], .little),
-        .wram0 => std.mem.readInt(u16, self.wram0[addr - WRAM0_OFF..][0..2], .little),
-        .wram1 => std.mem.readInt(u16, self.wram1[addr - WRAM1_OFF..][0..2], .little),
+        .hram => std.mem.readInt(u16, self.hram[addr - HRAM_OFF ..][0..2], .little),
+        .wram0 => std.mem.readInt(u16, self.wram0[addr - WRAM0_OFF ..][0..2], .little),
+        .wram1 => std.mem.readInt(u16, self.wram1[addr - WRAM1_OFF ..][0..2], .little),
         .echo => self.readBytes(addr - ECHO_DIFF),
         .ie => @panic("cant read ie as a u16"),
     };
@@ -224,7 +224,16 @@ const SB_OFF = 0xFF01;
 const SC_OFF = 0xFF02;
 
 const LCDC_OFF = 0xFF40;
-const LCDC = packed struct { bg_window_enable: bool, obj_enable: bool, obj_size: u1, bg_tile_map_area: u1, bg_window_tile_data_area: u1, window_enable: bool, window_tile_map_area: u1, lcd_ppu_enable: bool };
+const LCDC = packed struct {
+    bg_window_enable: bool,
+    obj_enable: bool,
+    obj_size: u1,
+    bg_tile_map_area: u1,
+    bg_window_tile_data_area: u1,
+    window_enable: bool,
+    window_tile_map_area: u1,
+    lcd_ppu_enable: bool,
+};
 
 const LY_OFF = 0xFF44;
 
@@ -340,7 +349,7 @@ fn ioReadByte(mem: Memory, addr: usize) u8 {
         else => {
             std.log.warn("unknown IO address: {X:0>4}", .{addr});
             return 0xFF;
-        }
+        },
     }
 }
 fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {

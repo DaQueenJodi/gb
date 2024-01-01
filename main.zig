@@ -9,7 +9,7 @@ const SCREEN_WIDTH = 144;
 const SCREEN_HEIGHT = 160;
 
 pub const std_options = struct {
-    pub const log_level: std.log.Level = .err;
+    pub const log_level: std.log.Level = .info;
 };
 
 const c = @cImport({
@@ -49,8 +49,8 @@ pub fn main() !void {
         for (0..cycles) |_| {
             try ppu.tick(cpu.mem);
         }
-        if (ppu.dots_count == 70224) {
-            ppu.resetFrame(cpu.mem);
+        if (ppu.just_finished) {
+            ppu.just_finished = false;
 
             if (true) {
                 c.BeginDrawing();
