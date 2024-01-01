@@ -2,23 +2,22 @@ const std = @import("std");
 const GB = @import("gameboy");
 const Ppu = GB.Ppu;
 const Cpu = GB.Cpu;
+const Timer = GB.Timer;
 const execNextInstruction = GB.execNextInstruction;
 const Cart = GB.Cart;
 
-const SCREEN_WIDTH = 144;
-const SCREEN_HEIGHT = 160;
+const SCREEN_WIDTH = 160;
+const SCREEN_HEIGHT = 144;
 
 pub const std_options = struct {
-    pub const log_level: std.log.Level = .info;
+    pub const log_level: std.log.Level = .warn;
 };
 
-const c = @cImport({
-    @cInclude("raylib.h");
-});
+pub const c = @import("c.zig");
 
 const KiB = 1024;
 
-const CART_IMAGE = @embedFile("roms/hello_world.gb");
+const CART_IMAGE = @embedFile("roms/Tetris.gb");
 
 pub fn main() !void {
     c.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "gb");
@@ -29,6 +28,7 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     var ppu = Ppu{};
+    var timer = Timer{};
     var cpu = try Cpu.create(allocator);
     defer cpu.deinit(allocator);
     @memcpy(cpu.mem.bank0[0..], CART_IMAGE[0..0x4000]);
@@ -43,11 +43,22 @@ pub fn main() !void {
         std.debug.print("flavor: {}\n", .{cart.flavor});
     }
 
-    var timer = try std.time.Timer.start();
-    while (true) {
-        const cycles = execNextInstruction(&cpu);
-        for (0..cycles) |_| {
+    var frame_timer = try std.time.Timer.start();
+    while (!c.WindowShouldClose()) {
+        var cycles = execNextInstruction(&cpu);
+        while (cycles > 0) : (cycles -= 1) {
+            cycles += cpu.handleInterupts();
             try ppu.tick(cpu.mem);
+            timer.tick(cpu.mem);
+            if (cpu.mem.oam_transfer_data) |d| {
+                if (d.cycle == 160) {
+                    cpu.mem.oam_transfer_data = null;
+                    continue;
+                }
+                const s = cpu.mem.readByte(d.src_start + d.cycle);
+                cpu.mem.writeByte(0xFE00 + d.cycle, s);
+                cpu.mem.oam_transfer_data.?.cycle += 1;
+            }
         }
         if (ppu.just_finished) {
             ppu.just_finished = false;
@@ -70,15 +81,17 @@ pub fn main() !void {
                 c.EndDrawing();
             }
 
-            const elapsed = timer.read();
+            const elapsed = frame_timer.read();
             const TARGET: u64 = std.time.ns_per_ms * 16.7;
-            //const elapsed_f: f32 = @floatFromInt(elapsed);
-            //const elapsed_ms = elapsed_f / std.time.ns_per_ms;
-            //try std.io.getStdOut().writer().print("took {}ms to draw the frame, target was {}ms\n", .{elapsed_ms, 16.7});
+            if (false) {
+                const elapsed_f: f32 = @floatFromInt(elapsed);
+                const elapsed_ms = elapsed_f / std.time.ns_per_ms;
+                try std.io.getStdOut().writer().print("took {}ms to draw the frame, target was {}ms\n", .{elapsed_ms, 16.7});
+            }
             if (elapsed < TARGET) {
                 std.time.sleep(TARGET - elapsed);
             }
-            timer.reset();
+            frame_timer.reset();
         }
     }
 

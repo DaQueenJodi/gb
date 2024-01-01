@@ -17,36 +17,63 @@ regs: Registers,
 pub fn create(allocator: Allocator) !Cpu {
     return Cpu{
         .ime_scheduled = false,
-        .mem = try Memory.create(allocator),
-        .regs = Registers.init(),
+        .mem = try Memory.create__(allocator),
+        .regs = Registers.init__(),
     };
 }
 pub fn deinit(cpu: Cpu, allocator: Allocator) void {
     allocator.destroy(cpu.mem);
 }
 
+pub fn handleInterupts(cpu: *Cpu) usize {
+    if (!cpu.regs.ime) return 0;
+    const IF: u8 = @bitCast(cpu.mem.io.IF);
+    const IE: u8 = @bitCast(cpu.mem.ie);
+    const allowed_interupts = IF & IE;
+    const n = @ctz(allowed_interupts);
+    const addr: u16 = switch (n) {
+        // VBLANK
+        0 => 0x40,
+        // LCD (STAT)
+        1 => 0x48,
+        // TIMER
+        2 => 0x50,
+        // Serial
+        3 => 0x58,
+        // Joypad
+        4 => 0x60,
+        else => return 0,
+    };
+
+    std.log.info("running interupt #{}", .{n});
+
+    const ns: u3 = @intCast(n);
+    cpu.mem.io.IF = @bitCast(IF & ~(@as(u8, 0x01) << ns));
+    cpu.regs.ime = false;
+
+    cpu.call(addr);
+
+    return 20;
+}
+
 pub fn nextByte(cpu: *Cpu) u8 {
     const b = cpu.mem.readByte(cpu.regs.pc);
-    std.log.debug("b: {X:0>2}", .{b});
     cpu.regs.pc +%= 1;
     return b;
 }
 
 pub fn nextSignedByte(cpu: *Cpu) i8 {
     const b: i8 = @bitCast(cpu.mem.readByte(cpu.regs.pc));
-    std.log.debug("b: {X:0>2}", .{b});
     cpu.regs.pc +%= 1;
     return b;
 }
 pub fn nextBytes(cpu: *Cpu) u16 {
     const bs = cpu.mem.readBytes(cpu.regs.pc);
-    std.log.debug("bs: {X:0>4}", .{bs});
     cpu.regs.pc +%= 2;
     return bs;
 }
 
 pub fn pushBytes(cpu: *Cpu, bytes: u16) void {
-    std.log.debug("PUSH", .{});
     cpu.regs.set("SP", cpu.regs.get("SP") -% 2);
     const addr = cpu.regs.get("SP");
     cpu.mem.writeBytes(addr, bytes);
@@ -64,7 +91,6 @@ pub fn peakBytes(cpu: *Cpu) u16 {
 }
 
 pub fn popBytes(cpu: *Cpu) u16 {
-    std.log.debug("POP", .{});
     const data = cpu.mem.readBytes(cpu.regs.get("SP"));
     cpu.regs.set("SP", cpu.regs.get("SP") +% 2);
     return data;

@@ -1,10 +1,15 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const rl = @import("root").c;
 
 const Memory = @This();
 
 const KiB = 1024;
 
+oam_transfer_data: ?struct {
+    src_start: u16,
+    cycle: u16 = 0,
+},
 sb_data: u8,
 rom_mapped: bool,
 bank0: [16 * KiB]u8,
@@ -22,15 +27,19 @@ const BOOT_ROM = @embedFile("bootroms/dmg_boot.bin");
 
 pub fn create__(allocator: Allocator) !*Memory {
     const mem = try allocator.create(Memory);
+    mem.oam_transfer_data = null;
     mem.rom_mapped = true;
     mem.io.LCDC.lcd_ppu_enable = false;
-
+    mem.io.LY = 0;
+    mem.io.SCX = 0;
+    mem.io.SCY = 0;
+    mem.io.IF = @bitCast(@as(u8, 0));
     return mem;
 }
 
 pub fn create(allocator: Allocator) !*Memory {
     const mem = try allocator.create(Memory);
-
+    mem.oam_transfer_data = null;
     mem.rom_mapped = false;
     mem.io.LY = 0;
 
@@ -102,7 +111,7 @@ fn rangeFromAddr(addr: usize) MemRange {
     };
 }
 
-pub fn readByte(self: Memory, addr: usize) u8 {
+pub fn readByte(self: Memory, addr: u16) u8 {
     const region = rangeFromAddr(addr);
     //std.log.debug("reading from: {}", .{region});
     return switch (region) {
@@ -136,7 +145,12 @@ pub fn readBytes(self: Memory, addr: usize) u16 {
             return 0xFFFF;
         },
         .external_ram => std.mem.readInt(u16, &[2]u8{ self.external_ram[addr - EXTERNAL_RAM_OFF], self.external_ram[addr - EXTERNAL_RAM_OFF + 1] }, .little),
-        .bank0 => std.mem.readInt(u16, self.bank0[addr - BANK0_OFF ..][0..2], .little),
+        .bank0 => {
+            if (self.rom_mapped and addr - BANK0_OFF < 0x0100) {
+                return std.mem.readInt(u16, BOOT_ROM[addr - BANK0_OFF ..][0..2], .little);
+            }
+            return std.mem.readInt(u16, self.bank0[addr - BANK0_OFF ..][0..2], .little);
+        },
         .bank1 => std.mem.readInt(u16, self.bank1[addr - BANK1_OFF ..][0..2], .little),
         .vram => std.mem.readInt(u16, self.vram[addr - VRAM_OFF ..][0..2], .little),
         .oam => std.mem.readInt(u16, self.oam[addr - OAM_OFF ..][0..2], .little),
@@ -246,6 +260,14 @@ const TAC = packed struct {
     clock_select: u2,
     enable: bool,
     _pdding: u5,
+    pub fn getHz(tac: TAC) usize {
+        return switch (tac.clock_select) {
+            0b00 => 4096,
+            0b01 => 262144,
+            0b10 => 65536,
+            0b11 => 16384,
+        };
+    }
 };
 
 const LYC_OFF = 0xFF45;
@@ -274,7 +296,24 @@ const OBP1_OFF = 0xFF49;
 const WY_OFF = 0xFF4A;
 const WX_OFF = 0xFF4B;
 
+const JOYP = packed struct {
+    a_right: bool,
+    b_left: bool,
+    select_up: bool,
+    start_down: bool,
+    dpad: bool,
+    buttons: bool,
+    _padding: u2,
+};
+const JOYP_OFF = 0xFF00;
+
+const DIV_OFF = 0xFF04;
+
+const OAM_DMA_TRANSFER_OFF = 0xFF46;
+
 const IoRegs = struct {
+    DIV: u8,
+    JOYP: JOYP,
     IF: IF,
     STAT: STAT,
     SCX: u8,
@@ -342,6 +381,27 @@ fn ioReadByte(mem: Memory, addr: usize) u8 {
         OBP1_OFF => {
             return @bitCast(mem.io.OBP1);
         },
+        JOYP_OFF => {
+            var joyp: JOYP = @bitCast(@as(u8, 0xFF));
+            if (mem.io.JOYP.buttons and mem.io.JOYP.dpad) return 0xFF;
+            if (!mem.io.JOYP.dpad) {
+                joyp.a_right = !rl.IsKeyDown(rl.KEY_RIGHT);
+                joyp.b_left = !rl.IsKeyDown(rl.KEY_LEFT);
+                joyp.select_up = !rl.IsKeyDown(rl.KEY_UP);
+                joyp.start_down = !rl.IsKeyDown(rl.KEY_DOWN);
+            } else if (!mem.io.JOYP.buttons) {
+                joyp.a_right = !rl.IsKeyDown(rl.KEY_A);
+                joyp.b_left = !rl.IsKeyDown(rl.KEY_B);
+                joyp.select_up = !rl.IsKeyDown(rl.KEY_E);
+                joyp.start_down = !rl.IsKeyDown(rl.KEY_S);
+            } else {
+                return 0x00;
+            }
+            return @bitCast(joyp);
+        },
+        DIV_OFF => {
+            return mem.io.DIV;
+        },
         0xFF10...0xFF26 => {
             std.log.warn("sound is not implemented yet :(", .{});
             return 0x0;
@@ -389,11 +449,6 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
             std.log.info("setting TMA to {}", .{val});
             mem.io.TMA = val;
         },
-        TAC_OFF => {
-            const v: TAC = @bitCast(val);
-            std.log.info("setting TAC to {}", .{v});
-            mem.io.TAC = v;
-        },
         LYC_OFF => {
             std.log.info("setting LYC to {}", .{val});
             mem.io.LYC = val;
@@ -420,6 +475,25 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
         WX_OFF => {
             std.log.info("setting WX to {}", .{val});
             mem.io.WX = val;
+        },
+        JOYP_OFF => {
+            const v: JOYP = @bitCast(val & 0b00110000);
+            std.log.info("setting JOYP to {}", .{v});
+            mem.io.JOYP = v;
+        },
+        DIV_OFF => {
+            mem.io.DIV = 0x00;
+        },
+        TAC_OFF => {
+            const v: TAC = @bitCast(val);
+            std.log.info("setting TAC to {}", .{v});
+            mem.io.TAC = v;
+        },
+        OAM_DMA_TRANSFER_OFF => {
+            const v16: u16 = @intCast(val);
+            const start = v16 * 0x100;
+            std.log.info("starting OAM trasfer from src: {X:0>4}", .{start});
+            mem.oam_transfer_data = .{ .src_start = start };
         },
         0xFF50 => {
             if (mem.rom_mapped) mem.rom_mapped = false;

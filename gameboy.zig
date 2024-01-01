@@ -4,6 +4,7 @@ pub const Ppu = HW.Ppu;
 pub const Memory = HW.Memory;
 pub const Cart = HW.Cart;
 pub const Registers = HW.Registers;
+pub const Timer = HW.Timer;
 pub const instructions = @import("instructions");
 
 pub fn execNextInstruction(cpu: *Cpu) usize {

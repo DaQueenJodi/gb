@@ -10,11 +10,8 @@ pub const FlagRegister = packed struct {
     z: bool,
 };
 
-const endianess = @import("builtin").cpu.arch.endian();
-const PackedReg = switch (endianess) {
-    .little => packed struct { b: u8, a: u8 },
-    .big => packed struct { a: u8, b: u8 },
-};
+const PackedReg = packed struct { b: u8, a: u8 };
+
 af: PackedReg,
 bc: PackedReg,
 de: PackedReg,
@@ -25,6 +22,7 @@ ime: bool,
 pub fn init__() Registers {
     var regs: Registers = undefined;
     regs.set("PC", 0x00);
+    regs.ime = false;
     return regs;
 }
 pub fn init() Registers {

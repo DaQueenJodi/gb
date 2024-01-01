@@ -8,8 +8,13 @@ const Ppu = @This();
 
 const TileFlavor = enum { bg, window };
 
+const FoundSprite = struct {
+    index: u8,
+    x_plus_7: u8
+};
+found_sprites: std.BoundedArray(FoundSprite, 10) = .{},
+oam_index: u8,
 just_finished: bool = false,
-display_buffer_index: usize = 0,
 fetcher: Fetcher = .{},
 wy_condition: bool = false,
 x: usize = 0,
@@ -48,8 +53,26 @@ pub fn tick(ppu: *Ppu, mem: *Memory) !void {
             if (mem.io.LY == mem.io.WY) {
                 ppu.wy_condition = true;
             }
+            // check an object every two dots
+            if (@mod(ppu.dots_count, 2) == 0) {
+                const idx: u16 = ppu.oam_index;
+                const addr = 0xFE00 + idx*4;
+                assert(addr <= 0xFE9F);
+
+                const y = mem.readByte(addr);
+                if (mem.io.LY + 16 == y) {
+                    const x = mem.readByte(addr + 1);
+                    ppu.found_sprites.append(.{
+                        .index = idx,
+                        .x_plus_7 = x,
+                    });
+                }
+
+                ppu.oam_index += 1;
+            }
             if (ppu.dots_count == OAM_END) {
                 ppu.mode = .drawing;
+                ppu.fetcher.reset();
             }
         },
         .drawing => {
@@ -63,9 +86,8 @@ pub fn tick(ppu: *Ppu, mem: *Memory) !void {
                     2 => .dark_grey,
                     3 => .black,
                 };
-                std.debug.print("pixel rendered: {}\n", .{p});
-                FB[ppu.display_buffer_index] = col;
-                ppu.display_buffer_index +%= 1;
+                const ly: u16 = @intCast(mem.io.LY);
+                FB[ly*SCREEN_WIDTH+ppu.x] = col;
                 ppu.x +%= 1;
             }
 
@@ -78,8 +100,11 @@ pub fn tick(ppu: *Ppu, mem: *Memory) !void {
             if (ppu.dots_count == DOTS_PER_SCANLINE) {
                 if (mem.io.LY == 143) {
                     ppu.mode = .vblank;
+                    mem.io.IF.vblank = true;
                 } else {
                     ppu.mode = .oam_scan;
+                    ppu.found_sprites.len = 0;
+                    ppu.oam_index = 0;
                 }
                 mem.io.LY +%= 1;
                 ppu.dots_count = 0;
@@ -90,11 +115,14 @@ pub fn tick(ppu: *Ppu, mem: *Memory) !void {
         .vblank => {
             if (mem.io.LY == 153 and ppu.dots_count == DOTS_PER_SCANLINE) {
                 ppu.just_finished = true;
+
                 ppu.mode = .oam_scan;
+                ppu.oam_index = 0;
+
+                ppu.found_sprites.len = 0;
                 mem.io.LY = 0;
                 ppu.fetcher.window_line_counter = 0;
                 ppu.dots_count = 0;
-                ppu.display_buffer_index = 0;
             }
 
             if (ppu.dots_count == DOTS_PER_SCANLINE) {
@@ -163,28 +191,29 @@ const Fetcher = struct {
         fetcher.sprite_fifo.discard(fetcher.sprite_fifo.readableLength());
         fetcher.other_fifo.discard(fetcher.other_fifo.readableLength());
     }
-    pub fn tick(fetcher: *Fetcher, mem: *Memory) !void {
-        switch (fetcher.state) {
-            .get_tile => {
-                fetcher.getTile(mem);
-                fetcher.state = .get_tile_data_low;
-            },
-            .get_tile_data_low => {
-                fetcher.getTileDataLow(mem);
-                fetcher.state = .get_tile_data_high;
-            },
-            .get_tile_data_high => {
-                fetcher.getTileDataHigh(mem);
-                fetcher.state = .push;
-            },
-            .push => {
-                if (try fetcher.push()) fetcher.state = .get_tile;
-            },
-        }
-
-        fetcher.should_waiting = !fetcher.should_waiting and fetcher.state != .push;
+    pub fn tick(ppu: Ppu, fetcher: *Fetcher, mem: *Memory) !void {
+        if (!fetcher.should_waiting) {
+            switch (fetcher.state) {
+                .get_tile => {
+                    fetcher.getTile(mem);
+                    fetcher.state = .get_tile_data_low;
+                },
+                .get_tile_data_low => {
+                    fetcher.getTileDataLow(mem);
+                    fetcher.state = .get_tile_data_high;
+                },
+                .get_tile_data_high => {
+                    fetcher.getTileDataHigh(mem);
+                    fetcher.state = .push;
+                },
+                .push => {
+                    if (try fetcher.push()) fetcher.state = .get_tile;
+                },
+            }
+        } else fetcher.should_waiting = !fetcher.should_waiting and fetcher.state != .push;
     }
     fn getTile(fetcher: *Fetcher, mem: *Memory) void {
+        const ly: u16 = mem.io.LY;
         const tilemap_addr: u16 = blk: {
             if (fetcher.rendering_window) {
                 break :blk switch (mem.io.LCDC.window_tile_map_area) {
@@ -199,63 +228,54 @@ const Fetcher = struct {
             }
         };
         if (fetcher.rendering_window) {
-            const y: u8 = @mod(fetcher.window_line_counter, 8);
-            const off = y *% 32 +% (fetcher.fetcher_x & 0x1F);
+            const y: u16 = @mod(fetcher.window_line_counter, 8);
+            const x = (fetcher.fetcher_x & 0x1F);
+            const off = y *% 32 +% x;
             fetcher.tile_number = mem.readByte(tilemap_addr + off);
         } else {
-            const scy = mem.io.SCY;
-            const scx = mem.io.SCX;
-            const a: u16 = ((mem.io.LY +% scy) >> 3) & 31;
-            const b: u16 = (fetcher.fetcher_x +% (scx >> 3)) & 31;
-            const off = a *% 32 +% b;
+            const x: u16 = (@divFloor(mem.io.SCX, 8) +% fetcher.fetcher_x) & 0x1F;
+            assert(x < 32);
+            const y: u16 = @divFloor((ly +% mem.io.SCY) & 255, 8);
+            const off = y *% 32 +% x;
             fetcher.tile_number = mem.readByte(tilemap_addr + off);
         }
     }
     fn getTileDataLow(fetcher: *Fetcher, mem: *Memory) void {
-        const signed, const tilemap: u16 = switch (mem.io.LCDC.bg_window_tile_data_area) {
-            0 => .{ true, 0x9000 },
-            1 => .{ false, 0x8000 },
-        };
-        const tile_addr = if (signed and fetcher.tile_number < 128) blk: {
-            const tile_number: u16 = @intCast(fetcher.tile_number);
-            break :blk tilemap + tile_number *% 16;
+        const ly: u16 = mem.io.LY;
+        const signed = mem.io.LCDC.bg_window_tile_data_area == 0;
+
+        const tile_number: u16 = fetcher.tile_number;
+        const tile_addr = if (signed) blk:  {
+            const base: u16 = if (tile_number < 128) 0x9000 else 0x8800;
+            break :blk base + tile_number *% 16;
         } else blk: {
-            const tile_number: u16 = @intCast(fetcher.tile_number);
-            break :blk tilemap + tile_number *% 16;
+            break :blk 0x8000 + tile_number *% 16;
         };
 
         const offset: u16 = switch (fetcher.rendering_window) {
             true => 2 * @mod(fetcher.window_line_counter, 8),
-            false => blk: {
-                const ly: u16 = @intCast(mem.io.LY);
-                break :blk 2 * @mod(ly +% mem.io.SCY, 8);
-            }
+            false => 2 * @mod(ly +% mem.io.SCY, 8),
         };
-
-        fetcher.tile_data_low = mem.readByte(tile_addr + offset);
+        fetcher.tile_data_low = mem.readByte(@intCast(tile_addr + offset));
     }
     fn getTileDataHigh(fetcher: *Fetcher, mem: *Memory) void {
-        const signed, const tilemap: u16 = switch (mem.io.LCDC.bg_window_tile_data_area) {
-            0 => .{ true, 0x9000 },
-            1 => .{ false, 0x8000 },
-        };
-        const tile_addr = if (signed and fetcher.tile_number < 128) blk: {
-            const tile_number: u16 = @intCast(fetcher.tile_number);
-            break :blk tilemap + tile_number *% 16;
+        const ly: u16 = mem.io.LY;
+        const signed = mem.io.LCDC.bg_window_tile_data_area == 0;
+
+        const tile_number: u16 = fetcher.tile_number;
+        const tile_addr = if (signed) blk:  {
+            const base: u16 = if (tile_number < 128) 0x9000 else 0x8800;
+            break :blk base + tile_number *% 16;
         } else blk: {
-            const tile_number: u16 = @intCast(fetcher.tile_number);
-            break :blk tilemap + tile_number *% 16;
+            break :blk 0x8000 + tile_number *% 16;
         };
 
         const offset: u16 = switch (fetcher.rendering_window) {
             true => 2 * @mod(fetcher.window_line_counter, 8),
-            false => blk: {
-            const ly: u16 = @intCast(mem.io.LY);
-                break :blk 2 * @mod(ly +% mem.io.SCY, 8);
-            }
+            false => 2 * @mod(ly +% mem.io.SCY, 8),
         };
 
-        fetcher.tile_data_high = mem.readByte(tile_addr + offset + 1);
+        fetcher.tile_data_high = mem.readByte(@intCast(tile_addr + offset + 1));
     }
     fn push(fetcher: *Fetcher) !bool {
         if (fetcher.other_fifo.count == 0) {
