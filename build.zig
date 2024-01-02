@@ -12,7 +12,8 @@ pub fn gameboy(b: *std.build, hardware: *Module, instructions: *Module) *std.bui
 }
 
 pub fn build(b: *std.Build) void {
-    const llvm = b.option(bool, "llvm", "") orelse false;
+    // on by default becasue it's very slow without it rn
+    const llvm = b.option(bool, "llvm", "") orelse true;
     const log_instrs = b.option(bool, "log_instrs", "") orelse false;
 
     const target = b.standardTargetOptions(.{});

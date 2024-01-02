@@ -8,14 +8,7 @@ const Ppu = @This();
 
 const TileFlavor = enum { bg, window };
 
-
-const SpriteAttributes = packed struct {
-    _cgb_stuff_i_dont_care_about: u4,
-    palette: u1,
-    xflip: bool,
-    yflip: bool,
-    priority: u1
-};
+const SpriteAttributes = packed struct { _cgb_stuff_i_dont_care_about: u4, palette: u1, xflip: bool, yflip: bool, priority: u1 };
 
 const FoundSprite = struct {
     x_plus_8: u8,
@@ -23,13 +16,13 @@ const FoundSprite = struct {
     tile_idx: u8,
     attributes: SpriteAttributes,
 };
+old_stat_line: bool = false,
 found_sprites: std.BoundedArray(FoundSprite, 10) = .{},
 oam_index: u8 = 0,
 just_finished: bool = false,
 fetcher: Fetcher = .{},
 wy_condition: bool = false,
 x: usize = 0,
-mode: Mode = .oam_scan,
 dots_count: usize = 0,
 
 const SCREEN_WIDTH = 160;
@@ -41,13 +34,6 @@ const OAM_END = 80;
 const DRAWING_END_BASE = 252;
 const HBLANK_END = 456;
 
-const Mode = enum {
-    hblank,
-    drawing,
-    oam_scan,
-    vblank,
-};
-
 const Color = enum {
     transparent,
     white,
@@ -55,6 +41,18 @@ const Color = enum {
     dark_grey,
     black,
 };
+
+pub fn handleLCDInterrupts(ppu: *Ppu, mem: *Memory) void {
+    const stat = mem.io.STAT;
+    // TODO: do this bitwise
+    const stat_line =
+        (stat.mode_0_select and stat.ppu_mode == .hblank) or
+        (stat.mode_1_select and stat.ppu_mode == .vblank) or
+        (stat.mode_2_select and stat.ppu_mode == .oam_scan) or
+        (stat.lyc_select and stat.lyc_eq_ly);
+    if (stat_line and !ppu.old_stat_line) mem.io.IF.stat = true;
+    ppu.old_stat_line = stat_line;
+}
 
 pub fn tick(ppu: *Ppu, mem: *Memory) !void {
     if (!mem.io.LCDC.lcd_ppu_enable) return;
@@ -65,7 +63,7 @@ pub fn tick(ppu: *Ppu, mem: *Memory) !void {
             if (mem.io.STAT.lyc_select) mem.io.IF.stat = true;
         }
     } else mem.io.STAT.lyc_eq_ly = false;
-    switch (ppu.mode) {
+    switch (mem.io.STAT.ppu_mode) {
         .oam_scan => {
             if (mem.io.LY == mem.io.WY) {
                 ppu.wy_condition = true;
@@ -92,7 +90,7 @@ pub fn tick(ppu: *Ppu, mem: *Memory) !void {
                 ppu.oam_index += 1;
             }
             if (ppu.dots_count == OAM_END) {
-                ppu.mode = .drawing;
+                mem.io.STAT.ppu_mode = .drawing;
                 ppu.fetcher.reset();
             }
         },
@@ -125,17 +123,17 @@ pub fn tick(ppu: *Ppu, mem: *Memory) !void {
             }
 
             if (ppu.x == 160) {
-                ppu.mode = .hblank;
+                mem.io.STAT.ppu_mode = .hblank;
                 ppu.x = 0;
             }
         },
         .hblank => {
             if (ppu.dots_count == DOTS_PER_SCANLINE) {
                 if (mem.io.LY == 143) {
-                    ppu.mode = .vblank;
+                    mem.io.STAT.ppu_mode = .vblank;
                     mem.io.IF.vblank = true;
                 } else {
-                    ppu.mode = .oam_scan;
+                    mem.io.STAT.ppu_mode = .oam_scan;
                     ppu.found_sprites.len = 0;
                     ppu.oam_index = 0;
                 }
@@ -149,7 +147,7 @@ pub fn tick(ppu: *Ppu, mem: *Memory) !void {
             if (mem.io.LY == 153 and ppu.dots_count == DOTS_PER_SCANLINE) {
                 ppu.just_finished = true;
 
-                ppu.mode = .oam_scan;
+                mem.io.STAT.ppu_mode = .oam_scan;
                 ppu.oam_index = 0;
                 ppu.found_sprites.len = 0;
 
@@ -229,7 +227,6 @@ const Fetcher = struct {
         fetcher.working_on_sprite = false;
     }
     pub fn tick(fetcher: *Fetcher, ppu: Ppu, mem: *Memory) !void {
-
         if (fetcher.hit_sprite_oam == null) {
             fetcher.hit_sprite_oam = blk: {
                 for (ppu.found_sprites.slice()) |s| {
@@ -265,7 +262,7 @@ const Fetcher = struct {
                             };
                         }
                         const tile_idx16: u16 = sprite.tile_idx;
-                        const tile_addr: u16 = 0x8000 + tile_idx16  * 16;
+                        const tile_addr: u16 = 0x8000 + tile_idx16 * 16;
                         assert(tile_addr <= 0x8FFF);
                         const y_plus_16_i: i16 = @intCast(sprite.y_plus_16);
                         const ly_i: i16 = @intCast(mem.io.LY);

@@ -35,6 +35,8 @@ pub fn create__(allocator: Allocator) !*Memory {
     mem.io.SCY = 0;
     mem.io.IF = @bitCast(@as(u8, 0));
     mem.ie = @bitCast(@as(u8, 0));
+    mem.io.STAT = @bitCast(@as(u8, 0));
+    mem.io.STAT.ppu_mode = .oam_scan;
     return mem;
 }
 
@@ -220,7 +222,12 @@ const IF = packed struct { vblank: bool, stat: bool, timer: bool, serial: bool, 
 
 const STAT_OFF = 0xFF41;
 const STAT = packed struct {
-    ppu_mode: u2,
+    ppu_mode: enum(u2) {
+        hblank = 0,
+        vblank = 1,
+        oam_scan = 2,
+        drawing = 3,
+    },
     lyc_eq_ly: bool,
     mode_0_select: bool,
     mode_1_select: bool,

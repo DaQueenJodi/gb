@@ -17,7 +17,7 @@ pub const c = @import("c.zig");
 
 const KiB = 1024;
 
-const CART_IMAGE = @embedFile("roms/DrMario.gb");
+const CART_IMAGE = @embedFile("roms/acid.gb");
 
 pub fn main() !void {
     c.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "gb");
@@ -47,9 +47,11 @@ pub fn main() !void {
     while (!c.WindowShouldClose()) {
         var cycles = execNextInstruction(&cpu);
         while (cycles > 0) : (cycles -= 1) {
+            ppu.handleLCDInterrupts(cpu.mem);
             cycles += cpu.handleInterupts();
             try ppu.tick(cpu.mem);
             timer.tick(cpu.mem);
+
             if (cpu.mem.oam_transfer_data) |d| {
                 if (d.cycle == 160) {
                     cpu.mem.oam_transfer_data = null;
