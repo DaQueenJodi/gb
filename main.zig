@@ -17,7 +17,7 @@ pub const c = @import("c.zig");
 
 const KiB = 1024;
 
-const CART_IMAGE = @embedFile("roms/acid.gb");
+const CART_IMAGE = @embedFile("roms/DrMario.gb");
 
 pub fn main() !void {
     c.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "gb");

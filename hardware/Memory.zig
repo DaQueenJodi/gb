@@ -435,8 +435,11 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
             mem.io.SCX = val;
         },
         STAT_OFF => {
-            const v: STAT = @bitCast(val);
-            mem.io.STAT = v;
+            const v: STAT = @bitCast(val );
+            mem.io.STAT.lyc_select = v.lyc_select;
+            mem.io.STAT.mode_0_select = v.lyc_select;
+            mem.io.STAT.mode_1_select = v.lyc_select;
+            mem.io.STAT.mode_2_select = v.lyc_select;
         },
         SB_OFF => {
             mem.sb_data = val;
