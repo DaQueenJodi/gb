@@ -34,6 +34,7 @@ pub fn create__(allocator: Allocator) !*Memory {
     mem.io.SCX = 0;
     mem.io.SCY = 0;
     mem.io.IF = @bitCast(@as(u8, 0));
+    mem.ie = @bitCast(@as(u8, 0));
     return mem;
 }
 
@@ -113,7 +114,6 @@ fn rangeFromAddr(addr: usize) MemRange {
 
 pub fn readByte(self: Memory, addr: u16) u8 {
     const region = rangeFromAddr(addr);
-    //std.log.debug("reading from: {}", .{region});
     return switch (region) {
         .prohiboted => {
             std.log.warn("reading from prohiboted memory region: {X:0<4}", .{addr});
@@ -141,7 +141,6 @@ pub fn readBytes(self: Memory, addr: usize) u16 {
     const region = rangeFromAddr(addr);
     return switch (region) {
         .prohiboted => {
-            std.log.warn("reading from prohiboted memory region: {X:0<4}", .{addr});
             return 0xFFFF;
         },
         .external_ram => std.mem.readInt(u16, &[2]u8{ self.external_ram[addr - EXTERNAL_RAM_OFF], self.external_ram[addr - EXTERNAL_RAM_OFF + 1] }, .little),
@@ -176,7 +175,6 @@ pub fn writeByte(self: *Memory, addr: usize, val: u8) void {
             std.log.warn("tried to write to ROM lol", .{});
         },
         .bank1 => {
-            self.bank1[addr - BANK1_OFF] = val;
             std.log.warn("tried to write to ROM lol", .{});
         },
         .vram => self.vram[addr - VRAM_OFF] = val,
@@ -289,7 +287,20 @@ const BGP = packed struct {
     }
 };
 
-const OBP = packed struct { _padding: u2, id1: u2, id2: u2, id3: u2 };
+const OBP = packed struct {
+    _padding: u2,
+    id1: u2,
+    id2: u2,
+    id3: u2,
+    pub fn get(self: OBP, n: usize) u2 {
+        return switch (n) {
+            1 => self.id1,
+            2 => self.id2,
+            3 => self.id3,
+            else => unreachable,
+        };
+    }
+};
 const OBP0_OFF = 0xFF48;
 const OBP1_OFF = 0xFF49;
 
@@ -403,7 +414,6 @@ fn ioReadByte(mem: Memory, addr: usize) u8 {
             return mem.io.DIV;
         },
         0xFF10...0xFF26 => {
-            std.log.warn("sound is not implemented yet :(", .{});
             return 0x0;
         },
         else => {
@@ -501,7 +511,7 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
             std.time.sleep(std.time.ns_per_s * 0.5);
         },
         0xFF7F => {},
-        0xFF10...0xFF26 => std.log.warn("sound is not implemented yet :(", .{}),
+        0xFF10...0xFF26 => {},
         else => std.log.warn("unknown IO address: {X:0<4}", .{addr}),
     };
 }

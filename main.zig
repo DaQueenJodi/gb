@@ -10,14 +10,14 @@ const SCREEN_WIDTH = 160;
 const SCREEN_HEIGHT = 144;
 
 pub const std_options = struct {
-    pub const log_level: std.log.Level = .warn;
+    pub const log_level: std.log.Level = .info;
 };
 
 pub const c = @import("c.zig");
 
 const KiB = 1024;
 
-const CART_IMAGE = @embedFile("roms/Tetris.gb");
+const CART_IMAGE = @embedFile("roms/acid.gb");
 
 pub fn main() !void {
     c.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "gb");
@@ -35,7 +35,7 @@ pub fn main() !void {
     @memcpy(cpu.mem.bank1[0..], CART_IMAGE[0x4000..]);
 
     const cart = Cart.init(CART_IMAGE);
-    if (true) {
+    if (false) {
         std.debug.print("name: {s}\n", .{cart.name});
         std.debug.print("rom size: {}\n", .{cart.rom_size});
         std.debug.print("ram size: {}\n", .{cart.ram_size});
@@ -57,6 +57,7 @@ pub fn main() !void {
                 }
                 const s = cpu.mem.readByte(d.src_start + d.cycle);
                 cpu.mem.writeByte(0xFE00 + d.cycle, s);
+
                 cpu.mem.oam_transfer_data.?.cycle += 1;
             }
         }
@@ -68,8 +69,9 @@ pub fn main() !void {
                 c.ClearBackground(c.WHITE);
                 for (0..SCREEN_HEIGHT) |y| {
                     for (0..SCREEN_WIDTH) |x| {
+                        @setRuntimeSafety(false);
                         const col = switch (Ppu.FB[y * SCREEN_WIDTH + x]) {
-                            .transparent => c.Color{ .a = 0 },
+                            .transparent => @panic("hi"),
                             .white => c.WHITE,
                             .black => c.BLACK,
                             .dark_grey => c.DARKGRAY,
@@ -86,7 +88,7 @@ pub fn main() !void {
             if (false) {
                 const elapsed_f: f32 = @floatFromInt(elapsed);
                 const elapsed_ms = elapsed_f / std.time.ns_per_ms;
-                try std.io.getStdOut().writer().print("took {}ms to draw the frame, target was {}ms\n", .{elapsed_ms, 16.7});
+                try std.io.getStdOut().writer().print("took {}ms to draw the frame, target was {}ms\n", .{ elapsed_ms, 16.7 });
             }
             if (elapsed < TARGET) {
                 std.time.sleep(TARGET - elapsed);
@@ -143,7 +145,6 @@ fn configToCpu(allocator: Allocator, config: Config) !Cpu {
     var mem = try allocator.create(Memory);
     mem.rom_mapped = false;
 
-    // TODO: desmellify this
     for (config.ram) |r| {
         const addr = r[0];
         mem.writeByte(addr, @intCast(r[1]));
@@ -198,12 +199,9 @@ const TEST_FILE_PATHS: [TEST_FILES_COUNT][]const u8 = blk: {
     var arr: [TEST_FILES_COUNT][]const u8 = undefined;
     var arr_i: usize = 0;
     // opcodes that dont exist
-    const exceptions = [12]u8{
-        0xD3, 0xE3, 0xE4, 0xF4, 0xDB, 0xEB, 0xEC, 0xFC, 0xFD, 0xED, 0xDD, 0xCB
-    };
+    const exceptions = [12]u8{ 0xD3, 0xE3, 0xE4, 0xF4, 0xDB, 0xEB, 0xEC, 0xFC, 0xFD, 0xED, 0xDD, 0xCB };
     for (0..0xFF) |b| {
-        if (std.mem.indexOfScalar(u8, &exceptions, b) == null)
-        {
+        if (std.mem.indexOfScalar(u8, &exceptions, b) == null) {
             arr[arr_i] = std.fmt.comptimePrint("tests/jsmoo/{x:0>2}.json.zst", .{b});
             arr_i += 1;
         }
