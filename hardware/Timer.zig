@@ -13,6 +13,7 @@ pub fn tick(timer: *Timer, mem: *Memory) void {
         const cycles_needed = @divExact(mem.io.TAC.getHz(), 64);
         if (@mod(timer.cycle, cycles_needed) == 0) {
             if (mem.io.TIMA == 0xFF) {
+                //mem.io.IF.timer = true;
                 mem.io.TIMA = mem.io.TMA;
             } else {
                 mem.io.TIMA += 1;

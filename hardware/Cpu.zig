@@ -17,16 +17,16 @@ regs: Registers,
 pub fn create(allocator: Allocator) !Cpu {
     return Cpu{
         .ime_scheduled = false,
-        .mem = try Memory.create__(allocator),
-        .regs = Registers.init__(),
+        .mem = try Memory.create(allocator),
+        .regs = Registers.init(),
     };
 }
 pub fn deinit(cpu: Cpu, allocator: Allocator) void {
     allocator.destroy(cpu.mem);
 }
 
-pub fn handleInterupts(cpu: *Cpu) usize {
-    if (!cpu.regs.ime) return 0;
+pub fn handleInterupts(cpu: *Cpu) bool {
+    if (!cpu.regs.ime) return false;
     const IF: u8 = @bitCast(cpu.mem.io.IF);
     const IE: u8 = @bitCast(cpu.mem.ie);
     const allowed_interupts = IF & IE;
@@ -42,18 +42,15 @@ pub fn handleInterupts(cpu: *Cpu) usize {
         3 => 0x58,
         // Joypad
         4 => 0x60,
-        else => return 0,
+        else => return false,
     };
-
-    std.log.info("running interupt #{}", .{n});
 
     const ns: u3 = @intCast(n);
     cpu.mem.io.IF = @bitCast(IF & ~(@as(u8, 0x01) << ns));
     cpu.regs.ime = false;
-
     cpu.call(addr);
 
-    return 20;
+    return true;
 }
 
 pub fn nextByte(cpu: *Cpu) u8 {

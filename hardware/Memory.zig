@@ -21,11 +21,11 @@ wram1: [4 * KiB]u8,
 oam: [0xA0]u8,
 io: IoRegs,
 hram: [0x7F]u8,
-ie: IE,
+ie: IRQBits,
 
 const BOOT_ROM = @embedFile("bootroms/dmg_boot.bin");
 
-pub fn create__(allocator: Allocator) !*Memory {
+pub fn create(allocator: Allocator) !*Memory {
     const mem = try allocator.create(Memory);
     mem.oam_transfer_data = null;
     mem.rom_mapped = true;
@@ -37,47 +37,10 @@ pub fn create__(allocator: Allocator) !*Memory {
     mem.ie = @bitCast(@as(u8, 0));
     mem.io.STAT = @bitCast(@as(u8, 0));
     mem.io.STAT.ppu_mode = .oam_scan;
-    return mem;
-}
-
-pub fn create(allocator: Allocator) !*Memory {
-    const mem = try allocator.create(Memory);
-    mem.oam_transfer_data = null;
-    mem.rom_mapped = false;
-    mem.io.LY = 0;
-
-    mem.writeByte(0xFF05, 0x00);
-    mem.writeByte(0xFF06, 0x00);
-    mem.writeByte(0xFF07, 0x00);
-    mem.writeByte(0xFF10, 0x80);
-    mem.writeByte(0xFF11, 0xBF);
-    mem.writeByte(0xFF12, 0xF3);
-    mem.writeByte(0xFF14, 0xBF);
-    mem.writeByte(0xFF16, 0x3F);
-    mem.writeByte(0xFF17, 0x00);
-    mem.writeByte(0xFF19, 0xBF);
-    mem.writeByte(0xFF1A, 0x7F);
-    mem.writeByte(0xFF1B, 0xFF);
-    mem.writeByte(0xFF1C, 0x9F);
-    mem.writeByte(0xFF1E, 0xBF);
-    mem.writeByte(0xFF20, 0xFF);
-    mem.writeByte(0xFF21, 0x00);
-    mem.writeByte(0xFF22, 0x00);
-    mem.writeByte(0xFF23, 0xBF);
-    mem.writeByte(0xFF24, 0x77);
-    mem.writeByte(0xFF25, 0xF3);
-    mem.writeByte(0xFF26, 0xF1);
-    mem.writeByte(0xFF40, 0x91);
-    mem.writeByte(0xFF42, 0x00);
-    mem.writeByte(0xFF43, 0x00);
-    mem.writeByte(0xFF45, 0x00);
-    mem.writeByte(0xFF47, 0xFC);
-    mem.writeByte(0xFF48, 0xFF);
-    mem.writeByte(0xFF49, 0xFF);
-    mem.writeByte(0xFF4A, 0x00);
-    mem.writeByte(0xFF4B, 0x00);
-    mem.writeByte(0xFFFF, 0x00);
-
+    mem.io.DIV = 0;
+    mem.io.TIMA = 0;
+    mem.io.TMA = 0;
+    mem.io.TAC = @bitCast(@as(u8, 0));
     return mem;
 }
 
@@ -139,32 +102,8 @@ pub fn readByte(self: Memory, addr: u16) u8 {
         .ie => @bitCast(self.ie),
     };
 }
-pub fn readBytes(self: Memory, addr: usize) u16 {
-    const region = rangeFromAddr(addr);
-    return switch (region) {
-        .prohiboted => {
-            return 0xFFFF;
-        },
-        .external_ram => std.mem.readInt(u16, &[2]u8{ self.external_ram[addr - EXTERNAL_RAM_OFF], self.external_ram[addr - EXTERNAL_RAM_OFF + 1] }, .little),
-        .bank0 => {
-            if (self.rom_mapped and addr - BANK0_OFF < 0x0100) {
-                return std.mem.readInt(u16, BOOT_ROM[addr - BANK0_OFF ..][0..2], .little);
-            }
-            return std.mem.readInt(u16, self.bank0[addr - BANK0_OFF ..][0..2], .little);
-        },
-        .bank1 => std.mem.readInt(u16, self.bank1[addr - BANK1_OFF ..][0..2], .little),
-        .vram => std.mem.readInt(u16, self.vram[addr - VRAM_OFF ..][0..2], .little),
-        .oam => std.mem.readInt(u16, self.oam[addr - OAM_OFF ..][0..2], .little),
-        .io => {
-            std.log.warn("IO is not implemented yet", .{});
-            return 0;
-        },
-        .hram => std.mem.readInt(u16, self.hram[addr - HRAM_OFF ..][0..2], .little),
-        .wram0 => std.mem.readInt(u16, self.wram0[addr - WRAM0_OFF ..][0..2], .little),
-        .wram1 => std.mem.readInt(u16, self.wram1[addr - WRAM1_OFF ..][0..2], .little),
-        .echo => self.readBytes(addr - ECHO_DIFF),
-        .ie => @panic("cant read ie as a u16"),
-    };
+pub fn readBytes(mem: Memory, addr: u16) u16 {
+    return std.mem.readInt(u16, &.{mem.readByte(addr), mem.readByte(addr+1)}, .little);
 }
 pub fn writeByte(self: *Memory, addr: usize, val: u8) void {
     const region = rangeFromAddr(addr);
@@ -189,36 +128,15 @@ pub fn writeByte(self: *Memory, addr: usize, val: u8) void {
         .ie => self.ie = @bitCast(val),
     }
 }
-pub fn writeBytes(self: *Memory, addr: usize, val: u16) void {
-    const region = rangeFromAddr(addr);
-    //std.log.debug("writing {X:0<4} to: {}", .{val, region});
-    switch (region) {
-        .prohiboted => {
-            std.log.warn("writing to prohiboted memory region: {X:0<4}", .{addr});
-        },
-        .bank0 => {
-            std.log.warn("tried to write to ROM lol", .{});
-        },
-        .bank1 => {
-            std.log.warn("tried to write to ROM lol", .{});
-        },
-        .vram => std.mem.writeInt(u16, self.vram[addr - VRAM_OFF ..][0..2], val, .little),
-        .oam => std.mem.writeInt(u16, self.oam[addr - OAM_OFF ..][0..2], val, .little),
-        .io => std.log.warn("IO not implemented yet", .{}),
-        .hram => std.mem.writeInt(u16, self.hram[addr - HRAM_OFF ..][0..2], val, .little),
-        .external_ram => std.mem.writeInt(u16, self.external_ram[addr - EXTERNAL_RAM_OFF ..][0..2], val, .little),
-        .wram0 => std.mem.writeInt(u16, self.wram0[addr - WRAM0_OFF ..][0..2], val, .little),
-        .wram1 => std.mem.writeInt(u16, self.wram1[addr - WRAM1_OFF ..][0..2], val, .little),
-        .echo => self.writeBytes(addr - ECHO_DIFF, val),
-        .ie => @panic("cant write u16 to ie"),
-    }
+pub fn writeBytes(mem: *Memory, addr: u16, val: u16) void {
+    const bs = std.mem.toBytes(val);
+    mem.writeByte(addr, bs[0]);
+    mem.writeByte(addr+1, bs[1]);
 }
 
-const IE = packed struct { vblank: bool, lcd: bool, timer: bool, serial: bool, joypad: bool, _padding: u3 };
+const IRQBits = packed struct { vblank: bool, stat: bool, timer: bool, serial: bool, joypad: bool, _padding: u3 };
 
 const IF_OFF = 0xFF0F;
-
-const IF = packed struct { vblank: bool, stat: bool, timer: bool, serial: bool, joypad: bool, _padding: u3 };
 
 const STAT_OFF = 0xFF41;
 const STAT = packed struct {
@@ -332,7 +250,7 @@ const OAM_DMA_TRANSFER_OFF = 0xFF46;
 const IoRegs = struct {
     DIV: u8,
     JOYP: JOYP,
-    IF: IF,
+    IF: IRQBits,
     STAT: STAT,
     SCX: u8,
     SCY: u8,
@@ -400,22 +318,7 @@ fn ioReadByte(mem: Memory, addr: usize) u8 {
             return @bitCast(mem.io.OBP1);
         },
         JOYP_OFF => {
-            var joyp: JOYP = @bitCast(@as(u8, 0xFF));
-            if (mem.io.JOYP.buttons and mem.io.JOYP.dpad) return 0xFF;
-            if (!mem.io.JOYP.dpad) {
-                joyp.a_right = !rl.IsKeyDown(rl.KEY_RIGHT);
-                joyp.b_left = !rl.IsKeyDown(rl.KEY_LEFT);
-                joyp.select_up = !rl.IsKeyDown(rl.KEY_UP);
-                joyp.start_down = !rl.IsKeyDown(rl.KEY_DOWN);
-            } else if (!mem.io.JOYP.buttons) {
-                joyp.a_right = !rl.IsKeyDown(rl.KEY_A);
-                joyp.b_left = !rl.IsKeyDown(rl.KEY_B);
-                joyp.select_up = !rl.IsKeyDown(rl.KEY_E);
-                joyp.start_down = !rl.IsKeyDown(rl.KEY_S);
-            } else {
-                return 0x00;
-            }
-            return @bitCast(joyp);
+            return @bitCast(mem.io.JOYP);
         },
         DIV_OFF => {
             return mem.io.DIV;
@@ -432,7 +335,7 @@ fn ioReadByte(mem: Memory, addr: usize) u8 {
 fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
     return switch (addr) {
         IF_OFF => {
-            const v: IF = @bitCast(val);
+            const v: IRQBits = @bitCast(val);
             mem.io.IF = v;
         },
         SCY_OFF => {
@@ -442,11 +345,11 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
             mem.io.SCX = val;
         },
         STAT_OFF => {
-            const v: STAT = @bitCast(val );
+            const v: STAT = @bitCast(val);
             mem.io.STAT.lyc_select = v.lyc_select;
-            mem.io.STAT.mode_0_select = v.lyc_select;
-            mem.io.STAT.mode_1_select = v.lyc_select;
-            mem.io.STAT.mode_2_select = v.lyc_select;
+            mem.io.STAT.mode_0_select = v.mode_0_select;
+            mem.io.STAT.mode_1_select = v.mode_1_select;
+            mem.io.STAT.mode_2_select = v.mode_2_select;
         },
         SB_OFF => {
             mem.sb_data = val;
@@ -458,6 +361,13 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
         LCDC_OFF => {
             const v: LCDC = @bitCast(val);
             std.log.info("setting LCDC to {}", .{v});
+            // when disabling the ppu/lcd, also clear the stat bits and LY
+            if (!v.lcd_ppu_enable) {
+                mem.io.LY = 0;
+                mem.io.STAT.mode_0_select = false;
+                mem.io.STAT.mode_1_select = false;
+                mem.io.STAT.mode_2_select = false;
+            }
             mem.io.LCDC = v;
         },
         LY_OFF => std.log.warn("trying to write to LY which is read only", .{}),
@@ -497,9 +407,9 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
             mem.io.WX = val;
         },
         JOYP_OFF => {
-            const v: JOYP = @bitCast(val & 0b00110000);
-            std.log.info("setting JOYP to {}", .{v});
-            mem.io.JOYP = v;
+            const v: JOYP = @bitCast(val);
+            mem.io.JOYP.dpad = v.dpad;
+            mem.io.JOYP.buttons = v.buttons;
         },
         DIV_OFF => {
             mem.io.DIV = 0x00;
@@ -512,7 +422,6 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
         OAM_DMA_TRANSFER_OFF => {
             const v16: u16 = @intCast(val);
             const start = v16 * 0x100;
-            std.log.info("starting OAM trasfer from src: {X:0>4}", .{start});
             mem.oam_transfer_data = .{ .src_start = start };
         },
         0xFF50 => {
@@ -522,7 +431,7 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
         },
         0xFF7F => {},
         0xFF10...0xFF26 => {},
-        else => std.log.warn("unknown IO address: {X:0<4}", .{addr}),
+        else => {}//std.log.warn("unknown IO address: {X:0<4}", .{addr}),
     };
 }
 
@@ -539,4 +448,11 @@ pub fn getTileMapAddr(mem: Memory, idx: u8) u16 {
             return @as(u16, 0x8000) + idx_b * 16;
         },
     }
+}
+
+
+pub fn getPendingInterrupts(mem: Memory) IRQBits {
+    const IE: u8 = @bitCast(mem.ie);
+    const IF: u8 = @bitCast(mem.io.IF);
+    return @bitCast(IE & IF);
 }

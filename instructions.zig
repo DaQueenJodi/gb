@@ -1798,6 +1798,7 @@ fn prefixed(cpu: *Cpu, opcode: u8) usize {
             cpu.srl("A");
             return 8;
         },
+        // BIT n r
         inline 0x40...0x7F => |op| {
             const off = op - 0x40;
             const bit_idx = @divFloor(off, 8);
@@ -1815,6 +1816,7 @@ fn prefixed(cpu: *Cpu, opcode: u8) usize {
                 return 12;
             }
         },
+        // RES n r
         inline 0x80...0xBF => |op| {
             const off = op - 0x80;
             const bit_idx: u3 = @divFloor(off, 8);
@@ -1835,6 +1837,7 @@ fn prefixed(cpu: *Cpu, opcode: u8) usize {
                 return 16;
             }
         },
+        // SET n r
         inline 0xC0...0xFF => |op| {
             const off = op - 0xC0;
             const bit_idx: u3 = @divFloor(off, 8);

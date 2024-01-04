@@ -19,21 +19,9 @@ hl: PackedReg,
 sp: u16,
 pc: u16,
 ime: bool,
-pub fn init__() Registers {
-    var regs: Registers = undefined;
-    regs.set("PC", 0x00);
-    regs.ime = false;
-    return regs;
-}
 pub fn init() Registers {
     var regs: Registers = undefined;
-    regs.set("PC", 0x0100);
-    regs.set("AF", 0x0001);
-    regs.set("F", 0xB0);
-    regs.set("BC", 0x0013);
-    regs.set("DE", 0x00D8);
-    regs.set("HL", 0x014D);
-    regs.set("SP", 0xFFFE);
+    regs.set("PC", 0x00);
     regs.ime = false;
     return regs;
 }
