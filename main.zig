@@ -57,7 +57,7 @@ pub fn main() !void {
         while (cycles > 0) : (cycles -= 1) {
             ppu.handleLCDInterrupts(cpu.mem);
             if (cpu.handleInterupts()) cycles += 20;
-            try ppu.tick(cpu.mem);
+            ppu.tick(cpu.mem);
             timer.tick(cpu.mem);
 
             if (cpu.mem.oam_transfer_data) |d| {
@@ -73,20 +73,14 @@ pub fn main() !void {
         }
         if (ppu.just_finished) {
             ppu.just_finished = false;
-            ppu.fetcher.window_line_counter = 0;
             if (true) {
                 c.BeginDrawing();
                 for (0..SCREEN_HEIGHT) |y| {
                     for (0..SCREEN_WIDTH) |x| {
                         @setRuntimeSafety(false);
-                        const col = switch (Ppu.FB[y * SCREEN_WIDTH + x]) {
-                            .transparent => @panic("hi"),
-                            .white => c.WHITE,
-                            .black => c.BLACK,
-                            .dark_grey => c.DARKGRAY,
-                            .light_grey => c.LIGHTGRAY,
-                        };
-                        c.DrawPixel(@intCast(x), @intCast(y), col);
+                        const col = Ppu.FB[y * SCREEN_WIDTH + x];
+                        const color = c.Color{.r = col, .g = col, .b = col, .a = 0xFF};
+                        c.DrawPixel(@intCast(x), @intCast(y), color);
                     }
                 }
                 c.EndDrawing();
