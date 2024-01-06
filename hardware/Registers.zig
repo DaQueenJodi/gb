@@ -25,35 +25,35 @@ pub fn init() Registers {
     regs.ime = false;
     return regs;
 }
-pub fn get_z(self: *Registers) bool {
+pub inline fn get_z(self: *Registers) bool {
     const f: *FlagRegister = @ptrCast(&self.af.b);
     return f.z;
 }
-pub fn get_n(self: *Registers) bool {
+pub inline fn get_n(self: *Registers) bool {
     const f: *FlagRegister = @ptrCast(&self.af.b);
     return f.n;
 }
-pub fn get_h(self: *Registers) bool {
+pub inline fn get_h(self: *Registers) bool {
     const f: *FlagRegister = @ptrCast(&self.af.b);
     return f.h;
 }
-pub fn get_c(self: *Registers) bool {
+pub inline fn get_c(self: *Registers) bool {
     const f: *FlagRegister = @ptrCast(&self.af.b);
     return f.c;
 }
-pub fn set_z(self: *Registers, v: bool) void {
+pub inline fn set_z(self: *Registers, v: bool) void {
     const f: *FlagRegister = @ptrCast(&self.af.b);
     f.z = v;
 }
-pub fn set_n(self: *Registers, v: bool) void {
+pub inline fn set_n(self: *Registers, v: bool) void {
     const f: *FlagRegister = @ptrCast(&self.af.b);
     f.n = v;
 }
-pub fn set_h(self: *Registers, v: bool) void {
+pub inline fn set_h(self: *Registers, v: bool) void {
     const f: *FlagRegister = @ptrCast(&self.af.b);
     f.h = v;
 }
-pub fn set_c(self: *Registers, v: bool) void {
+pub inline fn set_c(self: *Registers, v: bool) void {
     const f: *FlagRegister = @ptrCast(&self.af.b);
     f.c = v;
 }
@@ -71,7 +71,8 @@ fn getType(comptime s: []const u8) type {
         else => @compileError("s must be either length 1 or 2"),
     };
 }
-pub fn get(self: Registers, comptime s: []const u8) getType(s) {
+pub inline fn get(self: Registers, comptime s: []const u8) getType(s) {
+    @setEvalBranchQuota(10000);
     assertIsUpper(s);
     switch (s.len) {
         1 => {
@@ -105,7 +106,7 @@ pub fn get(self: Registers, comptime s: []const u8) getType(s) {
         else => unreachable,
     }
 }
-pub fn set(self: *Registers, comptime s: []const u8, val: anytype) void {
+pub inline fn set(self: *Registers, comptime s: []const u8, val: anytype) void {
     assertIsUpper(s);
     switch (s.len) {
         1 => {

@@ -18,10 +18,11 @@
   in
   {
     devShells.x86_64-linux.default = pkgs.mkShell {
-      packages = with pkgs; with xorg; [
+      packages = with pkgs; [
         zls
         zig
-        raylib
+        SDL2
+        pkg-config
         gdb
       ];
     };

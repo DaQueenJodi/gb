@@ -20,10 +20,10 @@ const MiB = KiB * 1024;
 fn ramSizeFromByte(b: u8) usize {
     return switch (b) {
         0 => 0,
-        1 => 2*KiB,
-        2 => 8*KiB,
-        3 => 32*KiB,
-        4 => 128*KiB,
+        1 => 2 * KiB,
+        2 => 8 * KiB,
+        3 => 32 * KiB,
+        4 => 128 * KiB,
         else => std.debug.panic("invalid byte: {}", .{b}),
     };
 }
@@ -39,7 +39,6 @@ fn romSizeFromByte(b: u8) usize {
         else => std.debug.panic("invalid byte: {}", .{b}),
     };
 }
-
 
 flavor: CartridgeFlavor,
 name: []const u8,

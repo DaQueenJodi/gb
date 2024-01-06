@@ -1,6 +1,10 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
+
 const GB = @import("gameboy");
+const Input = GB.Input;
+const Memory = GB.Memory;
 const Ppu = GB.Ppu;
 const Cpu = GB.Cpu;
 const Timer = GB.Timer;
@@ -9,12 +13,13 @@ const Cart = GB.Cart;
 
 const SCREEN_WIDTH = 160;
 const SCREEN_HEIGHT = 144;
+const SCREEN_SCALE = 1;
 
 pub const std_options = struct {
     pub const log_level: std.log.Level = .warn;
 };
 
-pub const c = @import("c.zig");
+pub const c = @import("c");
 
 const KiB = 1024;
 
@@ -27,14 +32,38 @@ pub fn main() !void {
 
     const args = try std.process.argsAlloc(allocator);
 
-    c.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "gb");
-    defer c.CloseWindow();
+    const window = c.SDL_CreateWindow(
+        "gb",
+        0,
+        0,
+        SCREEN_WIDTH * SCREEN_SCALE,
+        SCREEN_HEIGHT * SCREEN_SCALE,
+        c.SDL_WINDOW_OPENGL | c.SDL_WINDOW_RESIZABLE,
+    );
+    defer c.SDL_DestroyWindow(window);
+    const renderer = c.SDL_CreateRenderer(
+        window,
+        0,
+        c.SDL_RENDERER_PRESENTVSYNC | c.SDL_RENDERER_ACCELERATED,
+    );
+    defer c.SDL_DestroyRenderer(renderer);
 
+    _ = c.SDL_RenderSetLogicalSize(renderer, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+    const texture = c.SDL_CreateTexture(
+        renderer,
+        c.SDL_PIXELFORMAT_RGB24,
+        c.SDL_TEXTUREACCESS_STREAMING,
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
+    );
+
+
+    var input = Input{};
     var ppu = Ppu{};
     var timer = Timer{};
-    var cpu = try Cpu.create(allocator);
+    var cpu = try Cpu.create(allocator, &input);
     defer cpu.deinit(allocator);
-
 
     const file = args[1];
     const cart_image = try readFile(allocator, file);
@@ -52,7 +81,19 @@ pub fn main() !void {
     }
 
     var frame_timer = try std.time.Timer.start();
-    while (!c.WindowShouldClose()) {
+    var quit = false;
+
+    while (!quit) {
+        //c.___tracy_emit_frame_mark_start("loop");
+        //defer c.___tracy_emit_frame_mark_end("loop");
+        var sdl_event: c.SDL_Event = undefined;
+        while (c.SDL_PollEvent(&sdl_event) != 0) {
+            switch (sdl_event.type) {
+                c.SDL_QUIT => quit = true,
+                //c.SDL_KEYDOWN, c.SDL_KEYUP => input.handleSDLEvent(sdl_event),
+                else => {},
+            }
+        }
         var cycles = execNextInstruction(&cpu);
         while (cycles > 0) : (cycles -= 1) {
             ppu.handleLCDInterrupts(cpu.mem);
@@ -71,20 +112,22 @@ pub fn main() !void {
                 cpu.mem.oam_transfer_data.?.cycle += 1;
             }
         }
+
         if (ppu.just_finished) {
             ppu.just_finished = false;
-            if (true) {
-                c.BeginDrawing();
-                for (0..SCREEN_HEIGHT) |y| {
-                    for (0..SCREEN_WIDTH) |x| {
-                        @setRuntimeSafety(false);
-                        const col = Ppu.FB[y * SCREEN_WIDTH + x];
-                        const color = c.Color{.r = col, .g = col, .b = col, .a = 0xFF};
-                        c.DrawPixel(@intCast(x), @intCast(y), color);
-                    }
-                }
-                c.EndDrawing();
-            }
+
+
+            var pixels: [*]u8 = undefined;
+            var pitch: c_int = undefined;
+
+            _ = c.SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0x00);
+            _ = c.SDL_RenderClear(renderer);
+            _ = c.SDL_LockTexture(texture, null, @ptrCast(&pixels), &pitch);
+            @memcpy(pixels, Ppu.FB[0..]);
+            _ = c.SDL_UnlockTexture(texture);
+
+            _ = c.SDL_RenderCopy(renderer, texture, null, null);
+            c.SDL_RenderPresent(renderer);
 
             const elapsed = frame_timer.read();
             const TARGET: u64 = std.time.ns_per_ms * 16.7;
@@ -98,32 +141,10 @@ pub fn main() !void {
             }
             frame_timer.reset();
         }
-        const orig: u8 = @bitCast(cpu.mem.io.JOYP);
-        const joyp = &cpu.mem.io.JOYP;
-        if (!joyp.dpad) {
-            joyp.a_right = !c.IsKeyDown(c.KEY_RIGHT);
-            joyp.b_left = !c.IsKeyDown(c.KEY_LEFT);
-            joyp.select_up = !c.IsKeyDown(c.KEY_UP);
-            joyp.start_down = !c.IsKeyDown(c.KEY_DOWN);
-        } 
-        if (!joyp.buttons) {
-            joyp.a_right = !c.IsKeyDown(c.KEY_A);
-            joyp.b_left = !c.IsKeyDown(c.KEY_B);
-            joyp.select_up = !c.IsKeyDown(c.KEY_E);
-            joyp.start_down = !c.IsKeyDown(c.KEY_S);
-        }
-
-        const new: u8 = @bitCast(cpu.mem.io.JOYP);
-        // if a bit was reset
-        if (new & orig < orig) {
-            cpu.mem.io.IF.joypad = true;
-        }
     }
 
     std.process.cleanExit();
 }
-
-
 
 fn readFile(allocator: Allocator, path: []const u8) ![]const u8 {
     const f = try std.fs.cwd().openFile(path, .{});

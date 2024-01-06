@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const rl = @import("root").c;
+const Input = @import("Input.zig");
 
 const Memory = @This();
 
@@ -22,11 +23,13 @@ oam: [0xA0]u8,
 io: IoRegs,
 hram: [0x7F]u8,
 ie: IRQBits,
+input: *const Input,
 
 const BOOT_ROM = @embedFile("bootroms/dmg_boot.bin");
 
-pub fn create(allocator: Allocator) !*Memory {
+pub fn create(allocator: Allocator, input: *const Input) !*Memory {
     const mem = try allocator.create(Memory);
+    mem.input = input;
     mem.oam_transfer_data = null;
     mem.rom_mapped = true;
     mem.io.LCDC.lcd_ppu_enable = false;
@@ -103,20 +106,20 @@ pub fn readByte(self: Memory, addr: u16) u8 {
     };
 }
 pub fn readBytes(mem: Memory, addr: u16) u16 {
-    return std.mem.readInt(u16, &.{mem.readByte(addr), mem.readByte(addr+1)}, .little);
+    return std.mem.readInt(u16, &.{ mem.readByte(addr), mem.readByte(addr + 1) }, .little);
 }
 pub fn writeByte(self: *Memory, addr: usize, val: u8) void {
     const region = rangeFromAddr(addr);
     switch (region) {
         .prohiboted => {
-            std.log.warn("writing to prohiboted memory region: {X:0<4}", .{addr});
+            //std.log.warn("writing to prohiboted memory region: {X:0<4}", .{addr});
         },
         .external_ram => self.external_ram[addr - EXTERNAL_RAM_OFF] = val,
         .bank0 => {
-            std.log.warn("tried to write to ROM lol", .{});
+            //std.log.warn("tried to write to ROM lol", .{});
         },
         .bank1 => {
-            std.log.warn("tried to write to ROM lol", .{});
+            //std.log.warn("tried to write to ROM lol", .{});
         },
         .vram => self.vram[addr - VRAM_OFF] = val,
         .wram0 => self.wram0[addr - WRAM0_OFF] = val,
@@ -131,7 +134,7 @@ pub fn writeByte(self: *Memory, addr: usize, val: u8) void {
 pub fn writeBytes(mem: *Memory, addr: u16, val: u16) void {
     const bs = std.mem.toBytes(val);
     mem.writeByte(addr, bs[0]);
-    mem.writeByte(addr+1, bs[1]);
+    mem.writeByte(addr + 1, bs[1]);
 }
 
 const IRQBits = packed struct { vblank: bool, stat: bool, timer: bool, serial: bool, joypad: bool, _padding: u3 };
@@ -318,7 +321,21 @@ fn ioReadByte(mem: Memory, addr: usize) u8 {
             return @bitCast(mem.io.OBP1);
         },
         JOYP_OFF => {
-            return @bitCast(mem.io.JOYP);
+            var joyp = mem.io.JOYP;
+            if (joyp.dpad and joyp.buttons) return 0xFF;
+            if (joyp.dpad) {
+                joyp.start_down = mem.input.button_states.get(.down);
+                joyp.select_up = mem.input.button_states.get(.up);
+                joyp.b_left = mem.input.button_states.get(.left);
+                joyp.a_right = mem.input.button_states.get(.right);
+            }
+            if (joyp.buttons) {
+                joyp.start_down = mem.input.button_states.get(.start);
+                joyp.select_up = mem.input.button_states.get(.select);
+                joyp.b_left = mem.input.button_states.get(.b);
+                joyp.a_right = mem.input.button_states.get(.a);
+            }
+            return @bitCast(joyp);
         },
         DIV_OFF => {
             return mem.io.DIV;
@@ -327,7 +344,7 @@ fn ioReadByte(mem: Memory, addr: usize) u8 {
             return 0x0;
         },
         else => {
-            std.log.warn("unknown IO address: {X:0>4}", .{addr});
+            //std.log.warn("unknown IO address: {X:0>4}", .{addr});
             return 0xFF;
         },
     }
@@ -370,40 +387,40 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
             }
             mem.io.LCDC = v;
         },
-        LY_OFF => std.log.warn("trying to write to LY which is read only", .{}),
+        LY_OFF => {}, //std.log.warn("trying to write to LY which is read only", .{}),
         TIMA_OFF => {
-            std.log.info("setting TIMA to {}", .{val});
+            //std.log.info("setting TIMA to {}", .{val});
             mem.io.TIMA = val;
         },
         TMA_OFF => {
-            std.log.info("setting TMA to {}", .{val});
+            //std.log.info("setting TMA to {}", .{val});
             mem.io.TMA = val;
         },
         LYC_OFF => {
-            std.log.info("setting LYC to {}", .{val});
+            //std.log.info("setting LYC to {}", .{val});
             mem.io.LYC = val;
         },
         BGP_OFF => {
             const v: BGP = @bitCast(val);
-            std.log.info("setting BGP to {}", .{v});
+            //std.log.info("setting BGP to {}", .{v});
             mem.io.BGP = v;
         },
         OBP0_OFF => {
             const v: OBP = @bitCast(val);
-            std.log.info("setting OBP0 to {}", .{v});
+            //std.log.info("setting OBP0 to {}", .{v});
             mem.io.OBP0 = v;
         },
         OBP1_OFF => {
             const v: OBP = @bitCast(val);
-            std.log.info("setting OBP1 to {}", .{v});
+            //std.log.info("setting OBP1 to {}", .{v});
             mem.io.OBP1 = v;
         },
         WY_OFF => {
-            std.log.info("setting WY to {}", .{val});
+            //std.log.info("setting WY to {}", .{val});
             mem.io.WY = val;
         },
         WX_OFF => {
-            std.log.info("setting WX to {}", .{val});
+            //std.log.info("setting WX to {}", .{val});
             mem.io.WX = val;
         },
         JOYP_OFF => {
@@ -416,7 +433,7 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
         },
         TAC_OFF => {
             const v: TAC = @bitCast(val);
-            std.log.info("setting TAC to {}", .{v});
+            //std.log.info("setting TAC to {}", .{v});
             mem.io.TAC = v;
         },
         OAM_DMA_TRANSFER_OFF => {
@@ -431,7 +448,7 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
         },
         0xFF7F => {},
         0xFF10...0xFF26 => {},
-        else => {}//std.log.warn("unknown IO address: {X:0<4}", .{addr}),
+        else => {}, //std.log.warn("unknown IO address: {X:0<4}", .{addr}),
     };
 }
 
@@ -449,7 +466,6 @@ pub fn getTileMapAddr(mem: Memory, idx: u8) u16 {
         },
     }
 }
-
 
 pub fn getPendingInterrupts(mem: Memory) IRQBits {
     const IE: u8 = @bitCast(mem.ie);

@@ -1857,6 +1857,6 @@ fn prefixed(cpu: *Cpu, opcode: u8) usize {
                 cpu.mem.writeByte(addr, v | mask);
                 return 16;
             }
-        }
+        },
     }
 }

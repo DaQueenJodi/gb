@@ -6,7 +6,6 @@ const Timer = @This();
 
 cycle: usize = 0,
 
-
 pub fn tick(timer: *Timer, mem: *Memory) void {
     if (@mod(timer.cycle, 256) == 0) mem.io.DIV +%= 1;
     if (mem.io.TAC.enable) {
