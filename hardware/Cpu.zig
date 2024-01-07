@@ -10,26 +10,22 @@ const Cpu = @This();
 
 const CpuMode = enum { halt, stop, normal };
 
+mem: *Memory,
 mode: CpuMode = .normal,
 ime_scheduled: bool,
-mem: *Memory,
 regs: Registers,
 
-pub fn create(allocator: Allocator, input: *const Input) !Cpu {
+pub fn init(mem: *Memory) !Cpu {
     return Cpu{
+        .mem = mem,
         .ime_scheduled = false,
-        .mem = try Memory.create(allocator, input),
         .regs = Registers.init(),
     };
 }
-pub fn deinit(cpu: Cpu, allocator: Allocator) void {
-    allocator.destroy(cpu.mem);
-}
-
-pub fn handleInterupts(cpu: *Cpu) bool {
+pub fn handleInterupts(cpu: *Cpu, mem: *Memory) bool {
     if (!cpu.regs.ime) return false;
-    const IF: u8 = @bitCast(cpu.mem.io.IF);
-    const IE: u8 = @bitCast(cpu.mem.ie);
+    const IF: u8 = @bitCast(mem.io.IF);
+    const IE: u8 = @bitCast(mem.ie);
     const allowed_interupts = IF & IE;
     const n = @ctz(allowed_interupts);
     const addr: u16 = switch (n) {
@@ -47,7 +43,7 @@ pub fn handleInterupts(cpu: *Cpu) bool {
     };
 
     const ns: u3 = @intCast(n);
-    cpu.mem.io.IF = @bitCast(IF & ~(@as(u8, 0x01) << ns));
+    mem.io.IF = @bitCast(IF & ~(@as(u8, 0x01) << ns));
     cpu.regs.ime = false;
     cpu.call(addr);
 

@@ -24,13 +24,24 @@ pub const c = @import("c");
 const KiB = 1024;
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
     const args = try std.process.argsAlloc(allocator);
+    if (args.len < 2) @panic("please provide a file");
+    const file = args[1];
+
+    const cart_image = try readFile(allocator, file);
+    const cart = Cart.init(cart_image);
+
+    if (true) {
+        std.debug.print("name: {s}\n", .{cart.name});
+        std.debug.print("rom size: {}\n", .{cart.rom_size});
+        std.debug.print("ram size: {}\n", .{cart.ram_size});
+        std.debug.print("is japanese?: {}\n", .{cart.is_japanese});
+        std.debug.print("flavor: {}\n", .{cart.flavor});
+    }
 
     const window = c.SDL_CreateWindow(
         "gb",
@@ -58,27 +69,17 @@ pub fn main() !void {
         SCREEN_HEIGHT,
     );
 
-
+    // TODO: decouple Memory and Input
     var input = Input{};
+    var cpu = blk: {
+        var mem = try cart.memory(allocator, &input);
+        @memcpy(mem.bank0[0..], cart_image[0..0x4000]);
+        break :blk try Cpu.init(mem);
+    };
+
     var ppu = Ppu{};
     var timer = Timer{};
-    var cpu = try Cpu.create(allocator, &input);
-    defer cpu.deinit(allocator);
 
-    const file = args[1];
-    const cart_image = try readFile(allocator, file);
-
-    @memcpy(cpu.mem.bank0[0..], cart_image[0..0x4000]);
-    @memcpy(cpu.mem.bank1[0..], cart_image[0x4000..]);
-
-    const cart = Cart.init(cart_image);
-    if (true) {
-        std.debug.print("name: {s}\n", .{cart.name});
-        std.debug.print("rom size: {}\n", .{cart.rom_size});
-        std.debug.print("ram size: {}\n", .{cart.ram_size});
-        std.debug.print("is japanese?: {}\n", .{cart.is_japanese});
-        std.debug.print("flavor: {}\n", .{cart.flavor});
-    }
 
     var frame_timer = try std.time.Timer.start();
     var quit = false;
@@ -97,7 +98,7 @@ pub fn main() !void {
         var cycles = execNextInstruction(&cpu);
         while (cycles > 0) : (cycles -= 1) {
             ppu.handleLCDInterrupts(cpu.mem);
-            if (cpu.handleInterupts()) cycles += 20;
+            if (cpu.handleInterupts(cpu.mem)) cycles += 20;
             ppu.tick(cpu.mem);
             timer.tick(cpu.mem);
 

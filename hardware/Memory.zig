@@ -11,10 +11,10 @@ oam_transfer_data: ?struct {
     src_start: u16,
     cycle: u16 = 0,
 },
+vtable: MemoryVTable,
 sb_data: u8,
 rom_mapped: bool,
 bank0: [16 * KiB]u8,
-bank1: [16 * KiB]u8,
 vram: [8 * KiB]u8,
 external_ram: [8 * KiB]u8,
 wram0: [4 * KiB]u8,
@@ -27,8 +27,18 @@ input: *const Input,
 
 const BOOT_ROM = @embedFile("bootroms/dmg_boot.bin");
 
-pub fn create(allocator: Allocator, input: *const Input) !*Memory {
+const MemoryVTable = struct {
+    ctx: *anyopaque,
+    write_bank0: *const fn (ctx: *anyopaque, u16, u8) void,
+    read_bank1: *const fn (ctx: *anyopaque, u16) u8,
+    write_bank1: *const fn (ctx: *anyopaque, u16, u8) void,
+    write_ram: *const fn (ctx: *anyopaque, u16, u8) void,
+    read_ram: *const fn (ctx: *anyopaque, u16) u8,
+};
+
+pub fn create(allocator: Allocator, input: *const Input, vtable: MemoryVTable) !*Memory {
     const mem = try allocator.create(Memory);
+    mem.vtable = vtable;
     mem.input = input;
     mem.oam_transfer_data = null;
     mem.rom_mapped = true;
@@ -87,14 +97,14 @@ pub fn readByte(self: *const Memory, addr: u16) u8 {
             std.log.warn("reading from prohiboted memory region: {X:0<4}", .{addr});
             return 0xFF;
         },
-        .external_ram => self.external_ram[addr - EXTERNAL_RAM_OFF],
+        .external_ram => self.vtable.read_ram(self.vtable.ctx, addr),
         .bank0 => {
             if (self.rom_mapped and addr - BANK0_OFF < 0x0100) {
                 return BOOT_ROM[addr - BANK0_OFF];
             }
             return self.bank0[addr - BANK0_OFF];
         },
-        .bank1 => self.bank1[addr - BANK1_OFF],
+        .bank1 => self.vtable.read_bank1(self.vtable.ctx, addr),
         .vram => self.vram[addr - VRAM_OFF],
         .oam => self.oam[addr - OAM_OFF],
         .io => self.ioReadByte(addr),
@@ -108,19 +118,15 @@ pub fn readByte(self: *const Memory, addr: u16) u8 {
 pub fn readBytes(mem: *const Memory, addr: u16) u16 {
     return std.mem.readInt(u16, &.{ mem.readByte(addr), mem.readByte(addr + 1) }, .little);
 }
-pub fn writeByte(self: *Memory, addr: usize, val: u8) void {
+pub fn writeByte(self: *Memory, addr: u16, val: u8) void {
     const region = rangeFromAddr(addr);
     switch (region) {
         .prohiboted => {
             //std.log.warn("writing to prohiboted memory region: {X:0<4}", .{addr});
         },
-        .external_ram => self.external_ram[addr - EXTERNAL_RAM_OFF] = val,
-        .bank0 => {
-            //std.log.warn("tried to write to ROM lol", .{});
-        },
-        .bank1 => {
-            //std.log.warn("tried to write to ROM lol", .{});
-        },
+        .external_ram => self.vtable.write_ram(self.vtable.ctx, addr, val),
+        .bank0 => self.vtable.write_bank0(self.vtable.ctx, addr, val),
+        .bank1 => self.vtable.write_bank1(self.vtable.ctx, addr, val),
         .vram => self.vram[addr - VRAM_OFF] = val,
         .wram0 => self.wram0[addr - WRAM0_OFF] = val,
         .wram1 => self.wram1[addr - WRAM1_OFF] = val,

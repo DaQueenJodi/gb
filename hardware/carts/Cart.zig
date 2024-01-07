@@ -1,4 +1,12 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const assert = std.debug.assert;
+
+const Input = @import("../Input.zig");
+const Memory = @import("../Memory.zig");
+
+const Mbc1 = @import("Mbc1.zig");
+const RomOnly = @import("RomOnly.zig");
 
 const Cart = @This();
 
@@ -12,7 +20,9 @@ const DEST_CODE = 0x014A;
 
 const CartridgeFlavor = enum(u8) {
     ROM_ONLY = 0x0,
-    ROM_MBC1 = 0x1,
+    MBC1 = 0x01,
+    MBC1_RAM= 0x02,
+    MBC1_RAM_BATTERY = 0x03,
 };
 
 const KiB = 1024;
@@ -46,6 +56,7 @@ is_japanese: bool,
 /// size in bytes
 rom_size: usize,
 ram_size: usize,
+cart_mem: []const u8,
 pub fn init(cart: []const u8) Cart {
     const cartridge_flavor_byte = cart[CARTRIDGE_FLAVOR];
     const rom_size_byte = cart[ROM_SIZE];
@@ -57,11 +68,37 @@ pub fn init(cart: []const u8) Cart {
         }
         break :blk 16;
     };
+    std.log.err("flavor: {}", .{cartridge_flavor_byte});
+    const flavor: CartridgeFlavor = @enumFromInt(cartridge_flavor_byte);
+    const ram_size = blk: {
+        const ram_size = ramSizeFromByte(ram_size_byte);
+        if (ram_size == 0 and flavor == .MBC1_RAM_BATTERY) {
+            std.log.warn("cartridge has RAM attachment but reports RAM size as 0", .{});
+            break :blk 4*8*KiB;
+        }
+        break :blk ram_size;
+    };
     return .{
-        .flavor = @enumFromInt(cartridge_flavor_byte),
+        .cart_mem = cart,
+        .flavor = flavor,
         .name = name_start[0..name_len],
         .rom_size = romSizeFromByte(rom_size_byte),
-        .ram_size = ramSizeFromByte(ram_size_byte),
+        .ram_size = ram_size,
         .is_japanese = cart[DEST_CODE] == 0,
     };
+}
+
+pub fn memory(cart: Cart, allocator: Allocator, input: *const Input) !*Memory {
+    // NOTE: don't need to free since allocator is always an arena :p
+    switch (cart.flavor) {
+        .MBC1, .MBC1_RAM, .MBC1_RAM_BATTERY => {
+            const mapper = try Mbc1.create(allocator, cart);
+            return try mapper.memory(allocator, input);
+        },
+        .ROM_ONLY => {
+            const mapper = try RomOnly.create(allocator, cart);
+            return try mapper.memory(allocator, input);
+        },
+    }
+
 }
