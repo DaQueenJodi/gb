@@ -80,7 +80,7 @@ fn rangeFromAddr(addr: usize) MemRange {
     };
 }
 
-pub fn readByte(self: Memory, addr: u16) u8 {
+pub fn readByte(self: *const Memory, addr: u16) u8 {
     const region = rangeFromAddr(addr);
     return switch (region) {
         .prohiboted => {
@@ -105,7 +105,7 @@ pub fn readByte(self: Memory, addr: u16) u8 {
         .ie => @bitCast(self.ie),
     };
 }
-pub fn readBytes(mem: Memory, addr: u16) u16 {
+pub fn readBytes(mem: *const Memory, addr: u16) u16 {
     return std.mem.readInt(u16, &.{ mem.readByte(addr), mem.readByte(addr + 1) }, .little);
 }
 pub fn writeByte(self: *Memory, addr: usize, val: u8) void {
@@ -271,7 +271,7 @@ const IoRegs = struct {
 };
 
 const log_checking = false;
-fn ioReadByte(mem: Memory, addr: usize) u8 {
+fn ioReadByte(mem: *const Memory, addr: usize) u8 {
     switch (addr) {
         IF_OFF => {
             return @bitCast(mem.io.IF);
@@ -323,13 +323,14 @@ fn ioReadByte(mem: Memory, addr: usize) u8 {
         JOYP_OFF => {
             var joyp = mem.io.JOYP;
             if (joyp.dpad and joyp.buttons) return 0xFF;
-            if (joyp.dpad) {
+            // NOTE: false  means selected
+            if (!joyp.dpad) {
                 joyp.start_down = mem.input.button_states.get(.down);
                 joyp.select_up = mem.input.button_states.get(.up);
                 joyp.b_left = mem.input.button_states.get(.left);
                 joyp.a_right = mem.input.button_states.get(.right);
             }
-            if (joyp.buttons) {
+            if (!joyp.buttons) {
                 joyp.start_down = mem.input.button_states.get(.start);
                 joyp.select_up = mem.input.button_states.get(.select);
                 joyp.b_left = mem.input.button_states.get(.b);
@@ -381,6 +382,7 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
             // when disabling the ppu/lcd, also clear the stat bits and LY
             if (!v.lcd_ppu_enable) {
                 mem.io.LY = 0;
+                mem.io.STAT.ppu_mode = .hblank;
                 mem.io.STAT.mode_0_select = false;
                 mem.io.STAT.mode_1_select = false;
                 mem.io.STAT.mode_2_select = false;

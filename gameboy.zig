@@ -11,6 +11,15 @@ pub const Input = HW.Input;
 pub const instructions = @import("instructions");
 
 pub fn execNextInstruction(cpu: *Cpu) usize {
+    // TODO: HALT bug
+    // TODO: STOP
+    if (false and cpu.mode == .halt) {
+        const IE: u8 = @bitCast(cpu.mem.ie);
+        const IF: u8 = @bitCast(cpu.mem.io.IF);
+        if (IE & IF > 0) cpu.mode = .normal;
+        return 1;
+    }
+
     const ime_was_scheduled = cpu.ime_scheduled;
     const opcode = cpu.nextByte();
     const cycles = instructions.exec(cpu, opcode);

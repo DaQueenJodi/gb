@@ -17,9 +17,10 @@ const Button = enum  {
     right,
 };
 
-button_states: std.EnumArray(Button, bool) = std.EnumArray(Button, bool).initFill(false),
+// NOTE true means released
+button_states: std.EnumArray(Button, bool) = std.EnumArray(Button, bool).initFill(true),
 
-pub fn handleSDLEvent(input: *Input, event: c.SDL_Event) void {
+pub fn handleSDLEvent(input: *Input, event: c.SDL_Event, mem: *Memory) void {
     assert(event.type == c.SDL_KEYDOWN or event.type == c.SDL_KEYUP);
     const button: Button = switch (event.key.keysym.sym) {
         c.SDLK_s => .start,
@@ -33,9 +34,14 @@ pub fn handleSDLEvent(input: *Input, event: c.SDL_Event) void {
         else => return,
     };
 
+
     switch (event.type) {
-        c.SDL_KEYDOWN => input.button_states.set(button, true),
-        c.SDL_KEYUP => input.button_states.set(button, false),
+        // NOTE: false means pressed
+        c.SDL_KEYDOWN =>  {
+            mem.io.IF.joypad = true;
+            input.button_states.set(button, false);
+        },
+        c.SDL_KEYUP => input.button_states.set(button, true),
         else => unreachable,
     }
 }

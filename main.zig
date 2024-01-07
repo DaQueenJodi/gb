@@ -90,7 +90,7 @@ pub fn main() !void {
         while (c.SDL_PollEvent(&sdl_event) != 0) {
             switch (sdl_event.type) {
                 c.SDL_QUIT => quit = true,
-                //c.SDL_KEYDOWN, c.SDL_KEYUP => input.handleSDLEvent(sdl_event),
+                c.SDL_KEYDOWN, c.SDL_KEYUP => input.handleSDLEvent(sdl_event, cpu.mem),
                 else => {},
             }
         }

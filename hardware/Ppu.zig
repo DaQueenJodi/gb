@@ -7,7 +7,7 @@ const Ppu = @This();
 const SCREEN_W = 160;
 const SCREEN_H = 144;
 
-const SpriteAttributes = packed struct { _cgb_stuff_i_dont_care_about: u4, palette: u1, xflip: bool, yflip: bool, priority: u1 };
+const SpriteAttributes = packed struct { _cgb_stuff_i_dont_care_about: u4, palette: u1, xflip: bool, yflip: bool, priority: u1, };
 
 const FoundSprite = struct {
     x_plus_8: u8,
