@@ -68,17 +68,21 @@ pub fn tick(ppu: *Ppu, mem: *Memory) void {
             }
             if (ppu.scanline_dots == 80) {
                 ppu.sortFoundSprites();
+
                 ppu.mode3_penalties = 0;
                 mem.io.STAT.ppu_mode = .drawing;
                 ppu.pixel_x = 0;
                 ppu.next_sprite = ppu.found_sprites.popOrNull();
                 getBgTile(ppu, mem);
-
-                // sorted to make sure theyre displayed in the right order
-                // sorts descendingly, so you can pop elements off easily
             }
         },
         .drawing => {
+            if (ppu.wy_condition and ppu.pixel_x + 7 == mem.io.WX and mem.io.WX > 7 and mem.io.WX < 166) {
+                ppu.window_start_x = ppu.pixel_x;
+                ppu.inside_window = true;
+                ppu.getBgTile(mem);
+            }
+
             const ly: u32 = mem.io.LY;
             const idx: u32 = (ly * SCREEN_W + ppu.pixel_x) * 3;
             if (idx < FB.len) {
@@ -87,11 +91,6 @@ pub fn tick(ppu: *Ppu, mem: *Memory) void {
                 FB[idx] = px;
                 FB[idx + 1] = px;
                 FB[idx + 2] = px;
-            }
-            if (ppu.wy_condition and ppu.pixel_x + 7 == mem.io.WX and mem.io.WX > 7 and mem.io.WX < 166) {
-                ppu.window_start_x = ppu.pixel_x;
-                ppu.inside_window = true;
-                ppu.getBgTile(mem);
             }
             if (ppu.scanline_dots == 80 + 172 + ppu.mode3_penalties) {
                 mem.io.STAT.ppu_mode = .hblank;

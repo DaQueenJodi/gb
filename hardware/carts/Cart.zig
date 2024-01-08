@@ -72,7 +72,7 @@ pub fn init(cart: []const u8) Cart {
     const flavor: CartridgeFlavor = @enumFromInt(cartridge_flavor_byte);
     const ram_size = blk: {
         const ram_size = ramSizeFromByte(ram_size_byte);
-        if (ram_size == 0 and flavor == .MBC1_RAM_BATTERY) {
+        if (ram_size == 0 and (flavor == .MBC1_RAM_BATTERY or flavor == .MBC1_RAM)) {
             std.log.warn("cartridge has RAM attachment but reports RAM size as 0", .{});
             break :blk 4*8*KiB;
         }

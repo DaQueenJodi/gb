@@ -94,7 +94,6 @@ pub fn readByte(self: *const Memory, addr: u16) u8 {
     const region = rangeFromAddr(addr);
     return switch (region) {
         .prohiboted => {
-            std.log.warn("reading from prohiboted memory region: {X:0<4}", .{addr});
             return 0xFF;
         },
         .external_ram => self.vtable.read_ram(self.vtable.ctx, addr),
@@ -121,9 +120,7 @@ pub fn readBytes(mem: *const Memory, addr: u16) u16 {
 pub fn writeByte(self: *Memory, addr: u16, val: u8) void {
     const region = rangeFromAddr(addr);
     switch (region) {
-        .prohiboted => {
-            //std.log.warn("writing to prohiboted memory region: {X:0<4}", .{addr});
-        },
+        .prohiboted => {},
         .external_ram => self.vtable.write_ram(self.vtable.ctx, addr, val),
         .bank0 => self.vtable.write_bank0(self.vtable.ctx, addr, val),
         .bank1 => self.vtable.write_bank1(self.vtable.ctx, addr, val),
@@ -191,13 +188,13 @@ const TAC_OFF = 0xFF07;
 const TAC = packed struct {
     clock_select: u2,
     enable: bool,
-    _pdding: u5,
-    pub fn getHz(tac: TAC) usize {
+    _padding: u5,
+    pub fn getCycles(tac: TAC) usize {
         return switch (tac.clock_select) {
-            0b00 => 4096,
-            0b01 => 262144,
-            0b10 => 65536,
-            0b11 => 16384,
+            0b00 => 1024,
+            0b01 => 16,
+            0b10 => 64,
+            0b11 => 256
         };
     }
 };
@@ -276,7 +273,6 @@ const IoRegs = struct {
     WY: u8,
 };
 
-const log_checking = false;
 fn ioReadByte(mem: *const Memory, addr: usize) u8 {
     switch (addr) {
         IF_OFF => {
@@ -291,41 +287,17 @@ fn ioReadByte(mem: *const Memory, addr: usize) u8 {
         STAT_OFF => {
             return @bitCast(mem.io.STAT);
         },
-        SB_OFF => {
-            std.log.warn("Serial Transfer is not implemented :(", .{});
-            return 0x00;
-        },
-        SC_OFF => {
-            std.log.warn("Serial Transfer is not implemented :(", .{});
-            return 0x00;
-        },
-        LCDC_OFF => {
-            return @bitCast(mem.io.LCDC);
-        },
-        LY_OFF => {
-            return mem.io.LY;
-        },
-        TIMA_OFF => {
-            return mem.io.TIMA;
-        },
-        TMA_OFF => {
-            return mem.io.TMA;
-        },
-        TAC_OFF => {
-            return @bitCast(mem.io.TAC);
-        },
-        LYC_OFF => {
-            return mem.io.LYC;
-        },
-        BGP_OFF => {
-            return @bitCast(mem.io.BGP);
-        },
-        OBP0_OFF => {
-            return @bitCast(mem.io.OBP0);
-        },
-        OBP1_OFF => {
-            return @bitCast(mem.io.OBP1);
-        },
+        SB_OFF => return 0x00,
+        SC_OFF => return 0x00,
+        LCDC_OFF => return @bitCast(mem.io.LCDC),
+        LY_OFF => return mem.io.LY,
+        TIMA_OFF => return mem.io.TIMA,
+        TMA_OFF => return mem.io.TMA,
+        TAC_OFF => return @bitCast(mem.io.TAC),
+        LYC_OFF => return mem.io.LYC,
+        BGP_OFF => return @bitCast(mem.io.BGP),
+        OBP0_OFF => return @bitCast(mem.io.OBP0),
+        OBP1_OFF => return @bitCast(mem.io.OBP1),
         JOYP_OFF => {
             var joyp = mem.io.JOYP;
             if (joyp.dpad and joyp.buttons) return 0xFF;
@@ -344,16 +316,9 @@ fn ioReadByte(mem: *const Memory, addr: usize) u8 {
             }
             return @bitCast(joyp);
         },
-        DIV_OFF => {
-            return mem.io.DIV;
-        },
-        0xFF10...0xFF26 => {
-            return 0x0;
-        },
-        else => {
-            //std.log.warn("unknown IO address: {X:0>4}", .{addr});
-            return 0xFF;
-        },
+        DIV_OFF => return mem.io.DIV,
+        0xFF10...0xFF26 => return 0x0,
+        else => return 0xFF,
     }
 }
 fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
@@ -397,11 +362,10 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
         },
         LY_OFF => {}, //std.log.warn("trying to write to LY which is read only", .{}),
         TIMA_OFF => {
-            //std.log.info("setting TIMA to {}", .{val});
             mem.io.TIMA = val;
         },
         TMA_OFF => {
-            //std.log.info("setting TMA to {}", .{val});
+            std.log.warn("setting TMA to {}", .{val});
             mem.io.TMA = val;
         },
         LYC_OFF => {
@@ -441,7 +405,6 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
         },
         TAC_OFF => {
             const v: TAC = @bitCast(val);
-            //std.log.info("setting TAC to {}", .{v});
             mem.io.TAC = v;
         },
         OAM_DMA_TRANSFER_OFF => {
@@ -460,23 +423,3 @@ fn ioWriteByte(mem: *Memory, addr: usize, val: u8) void {
     };
 }
 
-pub fn getTileMapAddr(mem: Memory, idx: u8) u16 {
-    //std.debug.print("idx: {}\n", .{idx});
-    switch (mem.io.LCDC.bg_window_tile_data_area) {
-        0 => {
-            const idx_i: i8 = @bitCast(idx);
-            const idx_ib: i16 = @intCast(idx_i);
-            return @intCast(@as(i32, 0x9000) + idx_ib * 16);
-        },
-        1 => {
-            const idx_b: u16 = @intCast(idx);
-            return @as(u16, 0x8000) + idx_b * 16;
-        },
-    }
-}
-
-pub fn getPendingInterrupts(mem: Memory) IRQBits {
-    const IE: u8 = @bitCast(mem.ie);
-    const IF: u8 = @bitCast(mem.io.IF);
-    return @bitCast(IE & IF);
-}

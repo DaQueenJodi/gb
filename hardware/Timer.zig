@@ -9,7 +9,7 @@ cycle: usize = 0,
 pub fn tick(timer: *Timer, mem: *Memory) void {
     if (@mod(timer.cycle, 256) == 0) mem.io.DIV +%= 1;
     if (mem.io.TAC.enable) {
-        const cycles_needed = @divExact(mem.io.TAC.getHz(), 64);
+        const cycles_needed = mem.io.TAC.getCycles();
         if (@mod(timer.cycle, cycles_needed) == 0) {
             if (mem.io.TIMA == 0xFF) {
                 mem.io.IF.timer = true;

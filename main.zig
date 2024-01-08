@@ -49,7 +49,7 @@ pub fn main() !void {
         0,
         SCREEN_WIDTH * SCREEN_SCALE,
         SCREEN_HEIGHT * SCREEN_SCALE,
-        c.SDL_WINDOW_OPENGL | c.SDL_WINDOW_RESIZABLE,
+        c.SDL_WINDOW_RESIZABLE,
     );
     defer c.SDL_DestroyWindow(window);
     const renderer = c.SDL_CreateRenderer(
@@ -85,8 +85,6 @@ pub fn main() !void {
     var quit = false;
 
     while (!quit) {
-        //c.___tracy_emit_frame_mark_start("loop");
-        //defer c.___tracy_emit_frame_mark_end("loop");
         var sdl_event: c.SDL_Event = undefined;
         while (c.SDL_PollEvent(&sdl_event) != 0) {
             switch (sdl_event.type) {
@@ -98,7 +96,9 @@ pub fn main() !void {
         var cycles = execNextInstruction(&cpu);
         while (cycles > 0) : (cycles -= 1) {
             ppu.handleLCDInterrupts(cpu.mem);
-            if (cpu.handleInterupts(cpu.mem)) cycles += 20;
+            if (true or cpu.mode == .normal) {
+                if (cpu.handleInterupts(cpu.mem)) cycles += 20;
+            }
             ppu.tick(cpu.mem);
             timer.tick(cpu.mem);
 
@@ -158,3 +158,4 @@ fn readFile(allocator: Allocator, path: []const u8) ![]const u8 {
     _ = try f.readAll(buf);
     return buf;
 }
+

@@ -24,7 +24,6 @@ pub fn execNextInstruction(cpu: *Cpu) usize {
     const opcode = cpu.nextByte();
     const cycles = instructions.exec(cpu, opcode);
     if (ime_was_scheduled) {
-        std.log.info("ime was scheduled", .{});
         cpu.ime_scheduled = false;
         cpu.regs.ime = true;
     }

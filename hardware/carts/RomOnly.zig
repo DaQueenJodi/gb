@@ -6,11 +6,13 @@ const Memory = @import("../Memory.zig");
 const Input = @import("../Input.zig");
 const Cart = @import("Cart.zig");
 
+const RomOnly = @This();
+
 const KiB = 1024;
 
 extra_rom: [16*KiB]u8,
 
-pub fn memory(self: *@This(), allocator: Allocator, input: *const Input) !*Memory {
+pub fn memory(self: *RomOnly, allocator: Allocator, input: *const Input) !*Memory {
     return Memory.create(allocator, input, .{
         .ctx = self,
         .read_ram = readStub,
@@ -21,8 +23,8 @@ pub fn memory(self: *@This(), allocator: Allocator, input: *const Input) !*Memor
     });
 }
 
-pub fn create(allocator: Allocator, cart: Cart) !*@This() {
-    const rom_only = try allocator.create(@This());
+pub fn create(allocator: Allocator, cart: Cart) !*RomOnly {
+    const rom_only = try allocator.create(RomOnly);
     @memcpy(rom_only.extra_rom[0..], cart.cart_mem[16*KiB..]);
     return rom_only;
 }
@@ -36,8 +38,8 @@ fn writeStub(_: *anyopaque, _: u16, _: u8) void {
 }
 
 fn readBank1(ctx: *anyopaque, addr: u16) u8 {
-    const self: *@This() = @ptrCast(ctx);
-
+    const self: *RomOnly = @ptrCast(ctx);
+    
     assert(addr >= 0x4000 and addr <= 0x7FFF);
     return self.extra_rom[addr - 0x4000];
 }

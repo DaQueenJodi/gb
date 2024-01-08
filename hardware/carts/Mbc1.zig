@@ -81,12 +81,9 @@ fn ramWriteByte(ctx: *anyopaque, addr: u16, val: u8) void {
     assert(addr >= 0xA000 and addr <= 0xBFFF);
     if (!self.ram_enabled) return;
 
-    const real_addr: usize = switch (self.banking_mode_select) {
-        .simple => addr,
-        .advanced => blk: {
-            const ram_bank_number: usize = self.ram_bank_number;
-            break :blk addr+(8*KiB*ram_bank_number);
-        },
+    const real_addr: usize = blk: {
+        const ram_bank_number: usize = self.ram_bank_number;
+        break :blk addr+(8*KiB*ram_bank_number);
     };
     self.ram[real_addr - 0xA000] = val; 
 }
